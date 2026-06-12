@@ -13,6 +13,7 @@ import { webhookRoutes } from './routes/webhooks.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { apiKeyRoutes } from './routes/api-keys.js';
 import { integrationsErrorsRoutes } from './routes/integrations-errors.js';
+import { grafanaProxyRoutes } from './routes/grafana-proxy.js';
 import { startBridgeWorker } from './services/error-groups.js';
 import { startDailyDigestWorker } from './services/email-digest.js';
 import { eventRoutes } from './routes/events.js';
@@ -202,6 +203,10 @@ app.use('/storage/*', storageAuth, async (c, next) => {
   }
   await next();
 }, serveStatic({ root: './' }));
+
+// Same-origin Grafana proxy for Scout-authenticated users. This keeps the
+// public Grafana hostname protected while allowing Scout links to open directly.
+app.route('/grafana', grafanaProxyRoutes);
 
 // SSO bridge — lightweight HTML page for cross-domain token storage via postMessage
 app.get('/auth/sso', (c) => {

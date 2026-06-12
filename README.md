@@ -260,6 +260,7 @@ scout.example.com {
 | `SCOUT_ERROR_BRIDGE_BATCH_SIZE` | `20` | Error bridge jobs processed per worker tick |
 | `SCOUT_ERROR_BRIDGE_MAX_ATTEMPTS` | `10` | Max delivery attempts before a bridge job is marked dead |
 | `SCOUT_GRAFANA_URL` | — | Viewer-accessible Grafana URL used to rewrite Alertmanager Prometheus generator links for dashboard users. If users should open links without a second login, configure Grafana/proxy anonymous Viewer access for that public URL; Scout does not embed Grafana credentials in links. |
+| `SCOUT_GRAFANA_PROXY_TARGET` | — | Optional internal Grafana upstream for same-origin `/grafana/...` links. Requests require a valid Scout session cookie and should point to an internal/protected Grafana URL, not a public credential-bearing URL. |
 | `SMTP_HOST` | — | SMTP server for email notifications |
 | `SMTP_PORT` | `587` | SMTP port |
 | `SMTP_USER` | — | SMTP username |

@@ -76,6 +76,20 @@ function firstMessageLine(message: string | null | undefined) {
   return message?.split(/\r?\n/)[0]?.trim();
 }
 
+function grafanaHref(value: string) {
+  try {
+    const url = new URL(value);
+    const scoutHost = window.location.hostname;
+    const expectedGrafanaHost = scoutHost.startsWith('scout.') ? scoutHost.replace(/^scout\./, 'grafana.') : '';
+    if (expectedGrafanaHost && url.hostname === expectedGrafanaHost) {
+      return `/grafana${url.pathname}${url.search}${url.hash}`;
+    }
+  } catch {
+    return value;
+  }
+  return value;
+}
+
 export default function ErrorGroupCard({ group, actions, showLinkedItem = false }: ErrorGroupCardProps) {
   const { t, locale } = useTranslation();
   const route = group.routeTemplate ? `${group.method || '*'} ${group.routeTemplate}` : t('errors.fields.noRoute');
@@ -128,8 +142,8 @@ export default function ErrorGroupCard({ group, actions, showLinkedItem = false 
       )}
 
       <div className="mt-3 flex flex-wrap gap-2">
-        {group.grafanaLogsUrl && <a href={group.grafanaLogsUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-blue-600 hover:underline">{t('errors.links.logs')}</a>}
-        {group.grafanaTraceUrl && <a href={group.grafanaTraceUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-blue-600 hover:underline">{t('errors.links.trace')}</a>}
+        {group.grafanaLogsUrl && <a href={grafanaHref(group.grafanaLogsUrl)} target="_blank" rel="noreferrer" className="text-xs font-medium text-blue-600 hover:underline">{t('errors.links.logs')}</a>}
+        {group.grafanaTraceUrl && <a href={grafanaHref(group.grafanaTraceUrl)} target="_blank" rel="noreferrer" className="text-xs font-medium text-blue-600 hover:underline">{t('errors.links.trace')}</a>}
       </div>
 
       <details className="mt-3 text-xs text-gray-600">
