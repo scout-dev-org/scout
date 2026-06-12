@@ -223,6 +223,7 @@ function summarizeTempoTrace(trace: TempoTraceResponse, searchTrace: TempoSearch
           || key.startsWith('exception.')
           || key.startsWith('db.')
           || key.startsWith('net.')
+          || key.startsWith('gateway.')
           || key === 'route_template'
           || key === 'error_type'
           || key === 'upstream_service'
