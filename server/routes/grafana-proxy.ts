@@ -52,6 +52,13 @@ function copyRequestHeaders(source: Headers): Headers {
   return headers;
 }
 
+function toProxyLocation(pathname: string, search: string, hash: string): string {
+  const path = pathname === PROXY_PREFIX || pathname.startsWith(`${PROXY_PREFIX}/`)
+    ? pathname
+    : `${PROXY_PREFIX}${pathname.startsWith('/') ? pathname : `/${pathname}`}`;
+  return `${path}${search}${hash}`;
+}
+
 function copyResponseHeaders(source: Headers, targetBase: URL): Headers {
   const headers = new Headers(source);
   headers.delete('content-encoding');
@@ -63,10 +70,10 @@ function copyResponseHeaders(source: Headers, targetBase: URL): Headers {
     try {
       const parsed = new URL(location, targetBase);
       if (parsed.origin === targetBase.origin) {
-        headers.set('location', `${PROXY_PREFIX}${parsed.pathname}${parsed.search}${parsed.hash}`);
+        headers.set('location', toProxyLocation(parsed.pathname, parsed.search, parsed.hash));
       }
     } catch {
-      if (location.startsWith('/')) headers.set('location', `${PROXY_PREFIX}${location}`);
+      if (location.startsWith('/')) headers.set('location', toProxyLocation(location, '', ''));
     }
   }
 
