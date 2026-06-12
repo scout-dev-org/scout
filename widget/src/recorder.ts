@@ -31,6 +31,9 @@ const MUTATION_LIMIT = 10_000;
 /** Max buffer size in bytes before forced trim */
 const MAX_BUFFER_SIZE_BYTES = 5_000_000;
 
+/** Server accepts sessionRecording payloads up to 3M base64 chars. */
+const MAX_RECORDING_BASE64_CHARS = 3_000_000;
+
 /** Event throttling: max events per window */
 const THROTTLE_LIMIT = 60;
 const THROTTLE_WINDOW_MS = 5_000;
@@ -178,6 +181,22 @@ function shouldThrottle(): boolean {
   return throttleCount > THROTTLE_LIMIT;
 }
 
+function hasFullSnapshot(): boolean {
+  return events.some((event) => event.type === EVENT_TYPE_FULL_SNAPSHOT);
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]!);
+  }
+  return btoa(binary);
+}
+
+function fitServerLimit(base64: string): string | null {
+  return base64.length <= MAX_RECORDING_BASE64_CHARS ? base64 : null;
+}
+
 // --- Public API ---
 
 export function startRecording(): void {
@@ -292,7 +311,7 @@ export function stopRecording(): void {
 /**
  * Get recording as gzip-compressed base64 string.
  * Uses fflate for compression.
- * Returns null if recording failed or no events captured.
+ * Returns null when recording is unusable or too large for the API.
  */
 export function getRecordingCompressed(): string | null {
   if (recordingFailed || events.length === 0) return null;
@@ -300,6 +319,7 @@ export function getRecordingCompressed(): string | null {
   try {
     trimBuffer();
     if (events.length === 0) return null;
+    if (!hasFullSnapshot()) return null;
 
     const json = JSON.stringify(events);
     const encoded = new TextEncoder().encode(json);
@@ -307,19 +327,15 @@ export function getRecordingCompressed(): string | null {
     // Compress with fflate gzip.
     const compressed = gzipSync(encoded, { level: 6 });
 
-    // Convert to base64
-    let binary = '';
-    for (let i = 0; i < compressed.length; i++) {
-      binary += String.fromCharCode(compressed[i]!);
-    }
-    return btoa(binary);
+    return fitServerLimit(bytesToBase64(compressed));
   } catch (err) {
     console.warn('[Scout] Failed to compress recording:', err);
 
     // Fallback: try uncompressed
     try {
       const json = JSON.stringify(events);
-      return btoa(unescape(encodeURIComponent(json)));
+      const encoded = new TextEncoder().encode(json);
+      return fitServerLimit(bytesToBase64(encoded));
     } catch {
       return null;
     }

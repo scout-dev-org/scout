@@ -155,7 +155,8 @@ export const createItemSchema = z.object({
   viewportWidth: z.number().int().min(1).nullish(),
   viewportHeight: z.number().int().min(1).nullish(),
   screenshot: base64Schema(7_000_000).nullish(),       // base64, ~5MB file
-  sessionRecording: base64Schema(3_000_000).nullish(),  // base64, ~2MB file
+  // Full validation happens in the item service so widget reports can degrade gracefully.
+  sessionRecording: z.string().max(3_000_000).nullish(),
   metadata: z.record(z.string()).nullish(),               // auto-captured environment data
 });
 

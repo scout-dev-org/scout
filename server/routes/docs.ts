@@ -545,7 +545,7 @@ const spec = {
                   viewportWidth: { type: 'integer', minimum: 1, nullable: true },
                   viewportHeight: { type: 'integer', minimum: 1, nullable: true },
                   screenshot: { type: 'string', maxLength: 7000000, nullable: true, description: 'Base64-encoded image (~5MB max)' },
-                  sessionRecording: { type: 'string', maxLength: 3000000, nullable: true, description: 'Base64-encoded recording (~2MB max)' },
+                  sessionRecording: { type: 'string', maxLength: 3000000, nullable: true, description: 'Base64-encoded raw or gzip-compressed rrweb JSON event array (~2MB max)' },
                   metadata: { type: 'object', additionalProperties: { type: 'string' }, nullable: true, description: 'Auto-captured environment data' },
                 },
               },

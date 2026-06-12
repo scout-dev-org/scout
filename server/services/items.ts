@@ -6,6 +6,7 @@ import { gunzipSync } from 'node:zlib';
 import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { NotFoundError, ConflictError, ValidationError } from '../lib/errors.js';
+import { logger } from '../lib/logger.js';
 
 // Both db and tx share these methods — use minimal interface
 interface DbOrTx {
@@ -159,9 +160,15 @@ function requireHandoffEvidence(
   throw new ValidationError('Done requires fresh passing target-acceptance evidence', 'DONE_EVIDENCE_REQUIRED');
 }
 
-function decodeBase64Strict(base64: string): Buffer {
+const RRWEB_FULL_SNAPSHOT_TYPE = 2;
+
+function decodeBase64Strict(
+  base64: string,
+  errorMessage = 'Attachment payload must be valid base64',
+  errorCode = 'INVALID_ATTACHMENT',
+): Buffer {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64)) {
-    throw new ValidationError('Attachment payload must be valid base64', 'INVALID_ATTACHMENT');
+    throw new ValidationError(errorMessage, errorCode);
   }
   return Buffer.from(base64, 'base64');
 }
@@ -169,7 +176,7 @@ function decodeBase64Strict(base64: string): Buffer {
 function assertRecordingEvents(buffer: Buffer): void {
   try {
     const parsed = JSON.parse(buffer.toString('utf8')) as unknown;
-    if (!Array.isArray(parsed) || !parsed.some((event) => typeof event === 'object' && event !== null && (event as { type?: unknown }).type === 2)) {
+    if (!Array.isArray(parsed) || !parsed.some((event) => typeof event === 'object' && event !== null && (event as { type?: unknown }).type === RRWEB_FULL_SNAPSHOT_TYPE)) {
       throw new Error('invalid rrweb events');
     }
   } catch {
@@ -197,7 +204,11 @@ function saveRecording(base64: string, dir: string): string {
   mkdirSync(fullDir, { recursive: true });
   const filename = `${randomUUID()}.json`;
   const filePath = join(fullDir, filename);
-  const buffer = decodeBase64Strict(base64);
+  const buffer = decodeBase64Strict(
+    base64,
+    'Session recording must be valid base64',
+    'INVALID_SESSION_RECORDING',
+  );
   let jsonBuffer = buffer;
 
   // Detect gzip magic bytes (0x1f 0x8b) — decompress if gzip
@@ -255,7 +266,14 @@ export function createItem(data: {
     screenshotPath = saveFile(data.screenshot, 'screenshots', 'jpg');
   }
   if (data.sessionRecording) {
-    sessionRecordingPath = saveRecording(data.sessionRecording, 'recordings');
+    try {
+      sessionRecordingPath = saveRecording(data.sessionRecording, 'recordings');
+    } catch (err) {
+      if (data.source !== 'widget' || !(err instanceof ValidationError) || err.code !== 'INVALID_SESSION_RECORDING') {
+        throw err;
+      }
+      logger.warn({ projectId: data.projectId }, 'Discarding invalid optional widget session recording');
+    }
   }
 
   const id = randomUUID();
