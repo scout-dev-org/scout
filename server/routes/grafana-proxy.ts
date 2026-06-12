@@ -28,7 +28,10 @@ function extractToken(c: Context): string | null {
 
 function buildUpstreamUrl(requestUrl: string, targetBase: URL): URL {
   const source = new URL(requestUrl);
-  const path = source.pathname === PROXY_PREFIX
+  const stripPrefix = process.env.SCOUT_GRAFANA_PROXY_STRIP_PREFIX === 'true';
+  const path = !stripPrefix
+    ? source.pathname
+    : source.pathname === PROXY_PREFIX
     ? '/'
     : source.pathname.startsWith(`${PROXY_PREFIX}/`)
       ? source.pathname.slice(PROXY_PREFIX.length)
