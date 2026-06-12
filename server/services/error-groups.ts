@@ -212,24 +212,26 @@ function tempoAttributesMap(attributes: TempoAttribute[] | undefined): Record<st
 }
 
 function summarizeTempoTrace(trace: TempoTraceResponse, searchTrace: TempoSearchTrace): Record<string, unknown> {
-  const spans: Array<Record<string, unknown>> = [];
+  const gatewaySpans: Array<Record<string, unknown>> = [];
+  const otherSpans: Array<Record<string, unknown>> = [];
   for (const batch of trace.batches ?? []) {
     const resource = tempoAttributesMap(batch.resource?.attributes);
     for (const scopeSpan of batch.scopeSpans ?? []) {
       for (const span of scopeSpan.spans ?? []) {
         const attributes = tempoAttributesMap(span.attributes);
-        const hasDiagnosticAttributes = Object.keys(attributes).some((key) => (
+        const attributeKeys = Object.keys(attributes);
+        const hasGatewayAttributes = attributeKeys.some((key) => key.startsWith('gateway.'));
+        const hasDiagnosticAttributes = hasGatewayAttributes || attributeKeys.some((key) => (
           key.startsWith('http.')
           || key.startsWith('exception.')
           || key.startsWith('db.')
           || key.startsWith('net.')
-          || key.startsWith('gateway.')
           || key === 'route_template'
           || key === 'error_type'
           || key === 'upstream_service'
         ));
         if (!hasDiagnosticAttributes && !span.status) continue;
-        spans.push({
+        const summary = {
           name: span.name,
           kind: span.kind,
           startTimeUnixNano: span.startTimeUnixNano,
@@ -237,13 +239,13 @@ function summarizeTempoTrace(trace: TempoTraceResponse, searchTrace: TempoSearch
           status: span.status,
           resource,
           attributes,
-        });
-        if (spans.length >= MAX_TEMPO_SPANS) break;
+        };
+        if (hasGatewayAttributes) gatewaySpans.push(summary);
+        else if (otherSpans.length < MAX_TEMPO_SPANS) otherSpans.push(summary);
       }
-      if (spans.length >= MAX_TEMPO_SPANS) break;
     }
-    if (spans.length >= MAX_TEMPO_SPANS) break;
   }
+  const spans = [...gatewaySpans, ...otherSpans].slice(0, MAX_TEMPO_SPANS);
 
   return {
     traceID: searchTrace.traceID,
