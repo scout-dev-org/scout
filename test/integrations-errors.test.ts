@@ -351,6 +351,63 @@ describe('Error integrations routes', () => {
     expect(group.grafanaTraceUrl).toBe('https://grafana.example.test/explore?trace=test');
   });
 
+  it('enriches Alertmanager bridge events with matching Tempo trace diagnostics', async () => {
+    vi.stubEnv('SCOUT_ERROR_BRIDGE_SECRET', 'bridge-test-value');
+    vi.stubEnv('SCOUT_TEMPO_URL', 'http://tempo.test');
+    vi.stubEnv('SCOUT_GRAFANA_URL', 'https://grafana.example.test');
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: string | URL | Request) => {
+      const rawUrl = input instanceof Request ? input.url : String(input);
+      const url = new URL(rawUrl);
+      if (url.pathname === '/api/search') {
+        expect(url.searchParams.get('tags')).toContain('http.status_code=500');
+        expect(url.searchParams.get('tags')).toContain('http.target=/api/orders/42');
+        return new Response(JSON.stringify({
+          traces: [{ traceID: 'tempo-trace-test', rootServiceName: 'gateway', rootTraceName: 'POST *', startTimeUnixNano: '1767225600000000000', durationMs: 42 }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.pathname === '/api/traces/tempo-trace-test') {
+        return new Response(JSON.stringify({
+          batches: [{
+            resource: { attributes: [{ key: 'service.name', value: { stringValue: 'gateway' } }] },
+            scopeSpans: [{
+              spans: [{
+                name: 'POST *',
+                kind: 'SPAN_KIND_SERVER',
+                status: { code: 'STATUS_CODE_ERROR' },
+                attributes: [
+                  { key: 'http.method', value: { stringValue: 'POST' } },
+                  { key: 'http.target', value: { stringValue: '/api/orders/42' } },
+                  { key: 'http.status_code', value: { intValue: '500' } },
+                  { key: 'exception.message', value: { stringValue: 'upstream failed' } },
+                ],
+              }],
+            }],
+          }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      throw new Error(`Unexpected URL: ${rawUrl}`);
+    });
+    const payload = bridgePayload('test-project', 'bridge-tempo-enrichment');
+    payload.alerts[0]!.labels = {
+      route_template: '^/api/orders/42$',
+      method: 'POST',
+      upstream_service: 'billing',
+      error_type: 'upstream_5xx',
+      status_class: '5xx',
+    };
+
+    const res = await bridge(payload, 'bridge-test-value');
+    expect(res.status).toBe(202);
+
+    const group = ctx.db.select().from(errorGroups).get()!;
+    expect(group.sampleTraceId).toBe('tempo-trace-test');
+    expect(group.grafanaTraceUrl).toContain('https://grafana.example.test/explore?');
+    expect(group.samplePayload).toContain('upstream failed');
+    const item = ctx.db.select().from(scoutItems).where(eq(scoutItems.id, group.linkedItemId!)).get()!;
+    expect(item.message).toContain('Trace ID: tempo-trace-test');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('does not create active error groups from resolved bridge alerts', async () => {
     vi.stubEnv('SCOUT_ERROR_BRIDGE_SECRET', 'bridge-test-value');
     const payload = bridgePayload('test-project', 'bridge-resolved-only');
@@ -376,13 +433,13 @@ describe('Error integrations routes', () => {
     expect(output.join('\n')).not.toContain(secret);
   });
 
-  it('keeps failed bridge jobs pending with nextAttemptAt', () => {
+  it('keeps failed bridge jobs pending with nextAttemptAt', async () => {
     vi.stubEnv('SCOUT_ERROR_BRIDGE_BACKOFF_BASE_MS', '1000');
     const currentTime = '2026-01-01T00:00:00.000Z';
     const job = enqueueBridgeJob(bridgePayload('missing-project', 'bridge-fail-pending'));
     ctx.db.update(scoutBridgeJobs).set({ nextAttemptAt: currentTime }).where(eq(scoutBridgeJobs.id, job.id)).run();
 
-    const result = processBridgeJobs(10, currentTime);
+    const result = await processBridgeJobs(10, currentTime);
 
     const row = ctx.db.select().from(scoutBridgeJobs).where(eq(scoutBridgeJobs.id, job.id)).get()!;
     expect(result.failed).toBe(1);
@@ -391,12 +448,12 @@ describe('Error integrations routes', () => {
     expect(Date.parse(row.nextAttemptAt)).toBeGreaterThan(Date.parse(currentTime));
   });
 
-  it('moves bridge jobs to dead after max attempts', () => {
+  it('moves bridge jobs to dead after max attempts', async () => {
     vi.stubEnv('SCOUT_ERROR_BRIDGE_MAX_ATTEMPTS', '2');
     const job = enqueueBridgeJob(bridgePayload('missing-project', 'bridge-dead'));
     ctx.db.update(scoutBridgeJobs).set({ attempts: 1, nextAttemptAt: '2026-01-01T00:00:00.000Z' }).where(eq(scoutBridgeJobs.id, job.id)).run();
 
-    const result = processBridgeJobs(10, '2026-01-01T00:00:00.000Z');
+    const result = await processBridgeJobs(10, '2026-01-01T00:00:00.000Z');
 
     const row = ctx.db.select().from(scoutBridgeJobs).where(eq(scoutBridgeJobs.id, job.id)).get()!;
     expect(result.dead).toBe(1);
@@ -404,14 +461,14 @@ describe('Error integrations routes', () => {
     expect(row.attempts).toBe(2);
   });
 
-  it('delivers bridge job on successful retry', () => {
+  it('delivers bridge job on successful retry', async () => {
     const job = enqueueBridgeJob(bridgePayload('missing-project', 'bridge-retry-success'));
     ctx.db.update(scoutBridgeJobs).set({ nextAttemptAt: '2026-01-01T00:00:00.000Z' }).where(eq(scoutBridgeJobs.id, job.id)).run();
-    processBridgeJobs(10, '2026-01-01T00:00:00.000Z');
+    await processBridgeJobs(10, '2026-01-01T00:00:00.000Z');
     ctx.db.insert(projects).values({ id: randomUUID(), name: 'Missing Project', slug: 'missing-project', allowedOrigins: '[]' }).run();
     ctx.db.update(scoutBridgeJobs).set({ nextAttemptAt: '2026-01-01T00:00:00.000Z' }).where(eq(scoutBridgeJobs.id, job.id)).run();
 
-    const result = processBridgeJobs(10, '2026-01-01T00:00:00.000Z');
+    const result = await processBridgeJobs(10, '2026-01-01T00:00:00.000Z');
 
     const row = ctx.db.select().from(scoutBridgeJobs).where(eq(scoutBridgeJobs.id, job.id)).get()!;
     expect(result.processed).toBe(1);

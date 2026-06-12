@@ -259,7 +259,12 @@ scout.example.com {
 | `SCOUT_ERROR_BRIDGE_WORKER_INTERVAL_MS` | `30000` | Error bridge worker interval |
 | `SCOUT_ERROR_BRIDGE_BATCH_SIZE` | `20` | Error bridge jobs processed per worker tick |
 | `SCOUT_ERROR_BRIDGE_MAX_ATTEMPTS` | `10` | Max delivery attempts before a bridge job is marked dead |
+| `SCOUT_ERROR_SAMPLE_MAX_JSON_LENGTH` | `20000` | Max stored JSON length for error group sample payloads and trace diagnostics |
 | `SCOUT_GRAFANA_URL` | — | Viewer-accessible Grafana URL used to rewrite Alertmanager Prometheus generator links for dashboard users. If users should open links without a second login, configure Grafana/proxy anonymous Viewer access for that public URL; Scout does not embed Grafana credentials in links. |
+| `SCOUT_GRAFANA_TEMPO_DATASOURCE` | `Tempo` | Grafana Tempo datasource name/UID used when Scout builds trace links |
+| `SCOUT_TEMPO_URL` | — | Optional internal Tempo API base URL. When set, Alertmanager bridge jobs search matching traces by service/env/method/route/status and store trace diagnostics in error groups. |
+| `SCOUT_TEMPO_SEARCH_WINDOW_MS` | `900000` | Time window around alert `startsAt` used for Tempo trace lookup |
+| `SCOUT_TEMPO_TIMEOUT_MS` | `2000` | Per-request timeout for Tempo enrichment |
 | `SCOUT_GRAFANA_PROXY_TARGET` | — | Optional internal Grafana upstream for same-origin `/grafana/...` links. Requests require a valid Scout session cookie and should point to an internal/protected Grafana URL, not a public credential-bearing URL. |
 | `SCOUT_GRAFANA_PROXY_STRIP_PREFIX` | `false` | Set `true` only when the Grafana upstream is not configured with `/grafana` as its subpath. |
 | `SMTP_HOST` | — | SMTP server for email notifications |

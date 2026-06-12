@@ -81,7 +81,7 @@ export const integrationsErrorsRoutes = new Hono()
   .post('/bridge/alertmanager', zValidator('json', alertmanagerWebhookSchema), async (c) => {
     requireBridgeSecret(c);
     const job = enqueueBridgeJob(c.req.valid('json'));
-    processBridgeJobs(10);
+    await processBridgeJobs(10);
     return c.json({ data: { queued: true, ...job } }, job.inserted ? 202 : 200);
   })
   .get('/bridge/health', (c) => c.json({ data: { status: 'ok', queue: getBridgeStatus() } }));

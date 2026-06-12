@@ -41,7 +41,7 @@ type ErrorUpsertInput = {
 
 const SECRET_KEY_PATTERN = /(authorization|cookie|token|password|secret|key|credential|jwt)/i;
 const SECRET_VALUE_PATTERN = /(Bearer\s+)[A-Za-z0-9._~+/=-]+|((?:authorization|cookie|token|password|secret|key|credential|jwt)=)[^&\s,}]+/gi;
-const MAX_SAMPLE_JSON_LENGTH = 5000;
+const DEFAULT_SAMPLE_JSON_LENGTH = 20_000;
 const DEFAULT_OCCURRENCE_LIMIT = 100;
 const DEFAULT_REGRESSION_COOLDOWN_MS = 30 * 60 * 1000;
 const DEFAULT_BRIDGE_BATCH_SIZE = 20;
@@ -49,6 +49,23 @@ const DEFAULT_BRIDGE_INTERVAL_MS = 30_000;
 const DEFAULT_BRIDGE_MAX_ATTEMPTS = 10;
 const DEFAULT_BRIDGE_BACKOFF_BASE_MS = 30_000;
 const DEFAULT_BRIDGE_BACKOFF_MAX_MS = 60 * 60 * 1000;
+const DEFAULT_TEMPO_SEARCH_WINDOW_MS = 15 * 60 * 1000;
+const DEFAULT_TEMPO_TIMEOUT_MS = 2_000;
+const MAX_TEMPO_SPANS = 8;
+
+type TempoSearchTrace = {
+  traceID?: string;
+  rootServiceName?: string;
+  rootTraceName?: string;
+  startTimeUnixNano?: string;
+  durationMs?: number;
+};
+
+type TempoSearchResponse = { traces?: TempoSearchTrace[] };
+type TempoTraceResponse = { batches?: TempoBatch[] };
+type TempoBatch = { resource?: { attributes?: TempoAttribute[] }; scopeSpans?: Array<{ spans?: TempoSpan[] }> };
+type TempoSpan = { name?: string; kind?: string; startTimeUnixNano?: string; endTimeUnixNano?: string; attributes?: TempoAttribute[]; status?: Record<string, unknown> };
+type TempoAttribute = { key?: string; value?: Record<string, unknown> };
 
 function now(): string {
   return new Date().toISOString();
@@ -64,7 +81,8 @@ function stringifySample(value: Record<string, unknown> | undefined): string | n
   if (!value) return null;
   const redacted = redact(value);
   const json = JSON.stringify(redacted);
-  return json.length > MAX_SAMPLE_JSON_LENGTH ? json.slice(0, MAX_SAMPLE_JSON_LENGTH) : json;
+  const maxLength = getEnvInt('SCOUT_ERROR_SAMPLE_MAX_JSON_LENGTH', DEFAULT_SAMPLE_JSON_LENGTH, 1_000, 250_000);
+  return json.length > maxLength ? json.slice(0, maxLength) : json;
 }
 
 function redact(value: unknown): unknown {
@@ -111,6 +129,25 @@ function buildGrafanaExploreUrl(generatorUrl: unknown): string | undefined {
   }
 }
 
+function buildGrafanaTraceUrl(traceId: string): string | undefined {
+  const grafanaBase = process.env.SCOUT_GRAFANA_URL?.trim() || process.env.GRAFANA_PUBLIC_URL?.trim();
+  if (!grafanaBase) return undefined;
+
+  const datasource = process.env.SCOUT_GRAFANA_TEMPO_DATASOURCE?.trim() || 'Tempo';
+  try {
+    const target = new URL('/explore', grafanaBase.endsWith('/') ? grafanaBase : `${grafanaBase}/`);
+    target.searchParams.set('orgId', '1');
+    target.searchParams.set('left', JSON.stringify({
+      datasource,
+      queries: [{ refId: 'A', query: traceId, queryType: 'traceid' }],
+      range: { from: 'now-6h', to: 'now' },
+    }));
+    return target.toString();
+  } catch {
+    return undefined;
+  }
+}
+
 function firstString(...values: unknown[]): string | undefined {
   for (const value of values) {
     if (typeof value === 'string' && value.trim() !== '') return value.trim();
@@ -134,6 +171,150 @@ function parseStatusCode(value: unknown): number | undefined {
   if (!raw) return undefined;
   const statusCode = Number(raw);
   return Number.isInteger(statusCode) && statusCode >= 100 && statusCode <= 599 ? statusCode : undefined;
+}
+
+function routeTemplateToHttpTarget(routeTemplate: string | undefined): string | undefined {
+  if (!routeTemplate) return undefined;
+  let value = routeTemplate.trim();
+  if (value.startsWith('^')) value = value.slice(1);
+  if (value.endsWith('$')) value = value.slice(0, -1);
+  value = value.replace(/\\\//g, '/');
+  if (!value.startsWith('/') || /[()[\]{}+?|]/.test(value)) return undefined;
+  return value;
+}
+
+function tempoStatusCandidates(input: ErrorUpsertInput): number[] {
+  if (input.statusCode) return [input.statusCode];
+  if (input.statusClass === '5xx') return [500, 502, 503, 504];
+  if (input.statusClass === '4xx') return [400, 401, 403, 404, 429];
+  return [];
+}
+
+function tempoAttributeValue(attribute: TempoAttribute): unknown {
+  const value = attribute.value;
+  if (!value || typeof value !== 'object') return undefined;
+  if ('stringValue' in value) return value.stringValue;
+  if ('intValue' in value) return Number(value.intValue);
+  if ('doubleValue' in value) return Number(value.doubleValue);
+  if ('boolValue' in value) return Boolean(value.boolValue);
+  if ('arrayValue' in value || 'kvlistValue' in value) return value;
+  return undefined;
+}
+
+function tempoAttributesMap(attributes: TempoAttribute[] | undefined): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const attribute of attributes ?? []) {
+    if (!attribute.key) continue;
+    const value = tempoAttributeValue(attribute);
+    if (value !== undefined) result[attribute.key] = value;
+  }
+  return result;
+}
+
+function summarizeTempoTrace(trace: TempoTraceResponse, searchTrace: TempoSearchTrace): Record<string, unknown> {
+  const spans: Array<Record<string, unknown>> = [];
+  for (const batch of trace.batches ?? []) {
+    const resource = tempoAttributesMap(batch.resource?.attributes);
+    for (const scopeSpan of batch.scopeSpans ?? []) {
+      for (const span of scopeSpan.spans ?? []) {
+        const attributes = tempoAttributesMap(span.attributes);
+        const hasDiagnosticAttributes = Object.keys(attributes).some((key) => (
+          key.startsWith('http.')
+          || key.startsWith('exception.')
+          || key.startsWith('db.')
+          || key.startsWith('net.')
+          || key === 'route_template'
+          || key === 'error_type'
+          || key === 'upstream_service'
+        ));
+        if (!hasDiagnosticAttributes && !span.status) continue;
+        spans.push({
+          name: span.name,
+          kind: span.kind,
+          startTimeUnixNano: span.startTimeUnixNano,
+          endTimeUnixNano: span.endTimeUnixNano,
+          status: span.status,
+          resource,
+          attributes,
+        });
+        if (spans.length >= MAX_TEMPO_SPANS) break;
+      }
+      if (spans.length >= MAX_TEMPO_SPANS) break;
+    }
+    if (spans.length >= MAX_TEMPO_SPANS) break;
+  }
+
+  return {
+    traceID: searchTrace.traceID,
+    rootServiceName: searchTrace.rootServiceName,
+    rootTraceName: searchTrace.rootTraceName,
+    startTimeUnixNano: searchTrace.startTimeUnixNano,
+    durationMs: searchTrace.durationMs,
+    spans,
+  };
+}
+
+async function fetchTempoJson<T>(url: URL, timeoutMs: number): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Tempo returned ${response.status}`);
+    return await response.json() as T;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function enrichFromTempo(input: ErrorUpsertInput): Promise<ErrorUpsertInput> {
+  const tempoBase = process.env.SCOUT_TEMPO_URL?.trim();
+  if (!tempoBase || input.sampleTraceId) return input;
+
+  const occurredAt = Date.parse(input.occurredAt || now());
+  if (!Number.isFinite(occurredAt)) return input;
+
+  const timeoutMs = getEnvInt('SCOUT_TEMPO_TIMEOUT_MS', DEFAULT_TEMPO_TIMEOUT_MS, 100, 30_000);
+  const windowMs = getEnvInt('SCOUT_TEMPO_SEARCH_WINDOW_MS', DEFAULT_TEMPO_SEARCH_WINDOW_MS, 1_000, 24 * 60 * 60 * 1000);
+  const statusCandidates = tempoStatusCandidates(input);
+  const target = routeTemplateToHttpTarget(input.routeTemplate);
+  const tagParts = [`service.name=${input.service}`];
+  if (input.environment) tagParts.push(`deployment.environment=${input.environment}`);
+  if (input.method) tagParts.push(`http.method=${input.method}`);
+  if (target) tagParts.push(`http.target=${target}`);
+  const candidates = statusCandidates.length > 0 ? statusCandidates.map((status) => [...tagParts, `http.status_code=${status}`]) : [tagParts];
+
+  try {
+    const base = new URL(tempoBase.endsWith('/') ? tempoBase : `${tempoBase}/`);
+    for (const tags of candidates) {
+      const searchUrl = new URL('/api/search', base);
+      searchUrl.searchParams.set('tags', tags.join(' '));
+      searchUrl.searchParams.set('start', String(Math.floor((occurredAt - windowMs) / 1000)));
+      searchUrl.searchParams.set('end', String(Math.ceil((occurredAt + windowMs) / 1000)));
+      searchUrl.searchParams.set('limit', '1');
+      const search = await fetchTempoJson<TempoSearchResponse>(searchUrl, timeoutMs);
+      const trace = search.traces?.find((item) => typeof item.traceID === 'string' && item.traceID.trim() !== '');
+      if (!trace?.traceID) continue;
+
+      const traceUrl = new URL(`/api/traces/${encodeURIComponent(trace.traceID)}`, base);
+      const traceBody = await fetchTempoJson<TempoTraceResponse>(traceUrl, timeoutMs);
+      return {
+        ...input,
+        sampleTraceId: trace.traceID,
+        grafanaTraceUrl: input.grafanaTraceUrl ?? buildGrafanaTraceUrl(trace.traceID),
+        samplePayload: {
+          ...(input.samplePayload ?? {}),
+          tempo: {
+            searchTags: tags,
+            trace: summarizeTempoTrace(traceBody, trace),
+          },
+        },
+      };
+    }
+  } catch {
+    return input;
+  }
+
+  return input;
 }
 
 export function resolveErrorProjectId(input: ErrorUpsertInput): string {
@@ -436,7 +617,7 @@ export function normalizeAlertmanagerPayload(payload: any): ErrorUpsertInput[] {
     });
 }
 
-export function processBridgeJobs(limit = DEFAULT_BRIDGE_BATCH_SIZE, currentTime = now()): { processed: number; failed: number; dead: number } {
+export async function processBridgeJobs(limit = DEFAULT_BRIDGE_BATCH_SIZE, currentTime = now()): Promise<{ processed: number; failed: number; dead: number }> {
   const jobs = db.select().from(scoutBridgeJobs)
     .where(and(eq(scoutBridgeJobs.status, 'pending'), lte(scoutBridgeJobs.nextAttemptAt, currentTime)))
     .limit(limit)
@@ -448,7 +629,7 @@ export function processBridgeJobs(limit = DEFAULT_BRIDGE_BATCH_SIZE, currentTime
     try {
       db.update(scoutBridgeJobs).set({ status: 'processing', attempts: job.attempts + 1, processingStartedAt: now(), updatedAt: now() }).where(eq(scoutBridgeJobs.id, job.id)).run();
       const payload = JSON.parse(job.payload);
-      for (const event of normalizeAlertmanagerPayload(payload)) upsertErrorGroup(event);
+      for (const event of normalizeAlertmanagerPayload(payload)) upsertErrorGroup(await enrichFromTempo(event));
       db.update(scoutBridgeJobs).set({ status: 'delivered', processingStartedAt: null, lastError: null, updatedAt: now() }).where(eq(scoutBridgeJobs.id, job.id)).run();
       processed++;
     } catch (error) {
@@ -491,9 +672,9 @@ export function startBridgeWorker(): () => void {
   const intervalMs = getEnvInt('SCOUT_ERROR_BRIDGE_WORKER_INTERVAL_MS', DEFAULT_BRIDGE_INTERVAL_MS, 1_000, 60 * 60 * 1000);
   const batchSize = getEnvInt('SCOUT_ERROR_BRIDGE_BATCH_SIZE', DEFAULT_BRIDGE_BATCH_SIZE, 1, 1_000);
   const timer = setInterval(() => {
-    processBridgeJobs(batchSize);
+    processBridgeJobs(batchSize).catch(() => {});
   }, intervalMs);
   timer.unref?.();
-  processBridgeJobs(batchSize);
+  processBridgeJobs(batchSize).catch(() => {});
   return () => clearInterval(timer);
 }
