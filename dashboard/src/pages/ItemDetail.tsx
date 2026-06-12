@@ -12,6 +12,7 @@ import PriorityBadge from '../components/PriorityBadge';
 import ItemTypeBadge from '../components/ItemTypeBadge';
 import Labels, { parseLabels } from '../components/Labels';
 import SessionPlayer from '../components/SessionPlayer';
+import ErrorGroupCard, { type ErrorGroupCardData } from '../components/ErrorGroupCard';
 
 interface Note {
   id: number;
@@ -127,26 +128,7 @@ interface ItemData {
   permissions: ItemPermissions;
 }
 
-interface ErrorGroupRecord {
-  id: string;
-  fingerprint: string;
-  environment: string;
-  service: string;
-  routeTemplate: string | null;
-  method: string | null;
-  upstreamService: string | null;
-  errorType: string;
-  statusCode: number | null;
-  severity: 'info' | 'warning' | 'critical';
-  state: 'active' | 'ignored' | 'resolved';
-  occurrenceCount: number;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  sampleRequestId: string | null;
-  sampleTraceId: string | null;
-  grafanaLogsUrl: string | null;
-  grafanaTraceUrl: string | null;
-}
+type ErrorGroupRecord = ErrorGroupCardData;
 
 interface ItemPermissions {
   canClaim: boolean;
@@ -875,6 +857,7 @@ export default function ItemDetail() {
     : null;
 
   const meta = parseMetadata(item.metadata);
+  const itemText = splitItemMessage(item.message);
 
   const isTerminal = item.status === 'verified' || item.status === 'cancelled';
 
@@ -895,8 +878,13 @@ export default function ItemDetail() {
           <div className="min-w-0">
             {/* Page title: item message (truncated) */}
             <h1 className="text-lg font-bold leading-snug text-gray-900 break-words mb-2">
-              {item.message}
+              {itemText.title}
             </h1>
+            {itemText.details && (
+              <div className="mb-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 whitespace-pre-wrap">
+                {itemText.details}
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2 md:gap-3 text-sm text-gray-500">
               <ItemTypeBadge itemType={item.itemType} />
               <StatusBadge status={item.status} />
@@ -1143,27 +1131,7 @@ export default function ItemDetail() {
           <h3 className="mb-3 text-sm font-medium text-orange-900">{t('errors.itemContext.title')}</h3>
           <div className="space-y-3">
             {item.errorGroups.map((group) => (
-              <div key={group.id} className="rounded-md border border-orange-100 bg-white p-3 text-sm">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <span className="rounded bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800">{group.errorType}</span>
-                  <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{group.environment}</span>
-                  <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{group.service}</span>
-                  <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{t(`errors.states.${group.state}`)}</span>
-                </div>
-                <div className="grid gap-1 text-xs text-gray-600 md:grid-cols-2">
-                  <InfoRow label={t('errors.fields.fingerprint')} value={group.fingerprint} mono />
-                  <InfoRow label={t('errors.fields.occurrences')} value={String(group.occurrenceCount)} />
-                  <InfoRow label={t('errors.fields.firstSeen')} value={formatDate(group.firstSeenAt, locale)} />
-                  <InfoRow label={t('errors.fields.lastSeen')} value={formatDate(group.lastSeenAt, locale)} />
-                  <InfoRow label={t('errors.fields.route')} value={group.routeTemplate ? `${group.method || '*'} ${group.routeTemplate}` : null} mono />
-                  <InfoRow label={t('errors.fields.requestId')} value={group.sampleRequestId} mono />
-                  <InfoRow label={t('errors.fields.traceId')} value={group.sampleTraceId} mono />
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {group.grafanaLogsUrl && <a href={group.grafanaLogsUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-blue-600 hover:underline">{t('errors.links.logs')}</a>}
-                  {group.grafanaTraceUrl && <a href={group.grafanaTraceUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-blue-600 hover:underline">{t('errors.links.trace')}</a>}
-                </div>
-              </div>
+              <ErrorGroupCard key={group.id} group={group} />
             ))}
           </div>
         </div>
@@ -1823,6 +1791,34 @@ export default function ItemDetail() {
       )}
     </div>
   );
+}
+
+function splitItemMessage(message: string) {
+  const [firstLine = '', ...rest] = message.split(/\r?\n/);
+  const title = firstLine.trim() || message.trim();
+  const details = rest
+    .filter((line) => !isRuntimeMachineLine(line))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return { title, details };
+}
+
+function isRuntimeMachineLine(line: string) {
+  const normalized = line.trim().toLowerCase();
+  if (!normalized) return false;
+  return [
+    'fingerprint:',
+    'environment:',
+    'service:',
+    'error type:',
+    'route:',
+    'upstream:',
+    'request id:',
+    'trace id:',
+    'grafana logs:',
+    'grafana trace:',
+  ].some((prefix) => normalized.startsWith(prefix));
 }
 
 function InfoRow({

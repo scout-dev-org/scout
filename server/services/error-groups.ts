@@ -111,6 +111,31 @@ function buildGrafanaExploreUrl(generatorUrl: unknown): string | undefined {
   }
 }
 
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim() !== '') return value.trim();
+  }
+  return undefined;
+}
+
+function firstUrl(...values: unknown[]): string | undefined {
+  const value = firstString(...values);
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseStatusCode(value: unknown): number | undefined {
+  const raw = firstString(value);
+  if (!raw) return undefined;
+  const statusCode = Number(raw);
+  return Number.isInteger(statusCode) && statusCode >= 100 && statusCode <= 599 ? statusCode : undefined;
+}
+
 export function resolveErrorProjectId(input: ErrorUpsertInput): string {
   if (input.projectId) {
     const project = db.select({ id: projects.id }).from(projects).where(eq(projects.id, input.projectId)).get();
@@ -384,6 +409,7 @@ export function normalizeAlertmanagerPayload(payload: any): ErrorUpsertInput[] {
       const service = labels.service || labels.job || 'unknown';
       const alertname = labels.alertname || 'AlertmanagerAlert';
       const fingerprint = alert.fingerprint || createHash('sha256').update(`${env}|${service}|${alertname}|${labels.route_template || ''}|${labels.error_type || ''}`).digest('hex');
+      const explicitLogsUrl = firstUrl(annotations.grafana_logs_url, annotations.logs_url, labels.grafana_logs_url, labels.logs_url);
       return {
         projectSlug: labels.project || labels.project_slug || 'avtozor',
         source: 'alertmanager',
@@ -394,10 +420,14 @@ export function normalizeAlertmanagerPayload(payload: any): ErrorUpsertInput[] {
         method: labels.method,
         upstreamService: labels.upstream_service,
         errorType: labels.error_type || alertname,
+        statusCode: parseStatusCode(labels.status_code || labels.statusCode),
         statusClass: labels.status_class,
         severity: labels.severity === 'critical' ? 'critical' : labels.severity === 'info' ? 'info' : 'warning',
         occurredAt: alert.startsAt && !Number.isNaN(Date.parse(alert.startsAt)) ? new Date(alert.startsAt).toISOString() : now(),
-        grafanaLogsUrl: buildGrafanaExploreUrl(alert.generatorURL),
+        sampleRequestId: firstString(labels.request_id, labels.requestId, annotations.request_id, annotations.requestId),
+        sampleTraceId: firstString(labels.trace_id, labels.traceId, labels.traceID, annotations.trace_id, annotations.traceId, annotations.traceID),
+        grafanaLogsUrl: explicitLogsUrl || buildGrafanaExploreUrl(alert.generatorURL),
+        grafanaTraceUrl: firstUrl(annotations.grafana_trace_url, annotations.trace_url, labels.grafana_trace_url, labels.trace_url),
         title: `[${env}][${service}] ${alertname}`,
         message: annotations.summary || annotations.description,
         release: labels.release || labels.deploy_sha || labels.deployment_sha,

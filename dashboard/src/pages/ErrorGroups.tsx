@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { useSearchParams } from 'react-router';
 import { api } from '../lib/api';
-import { formatDate } from '../lib/date';
 import { canTriageErrors } from '../lib/auth';
 import {
   findSelectableProjectId,
@@ -10,6 +9,7 @@ import {
 } from '../lib/project-selection';
 import { useTranslation } from '../i18n';
 import Pagination from '../components/Pagination';
+import ErrorGroupCard, { type ErrorGroupCardData } from '../components/ErrorGroupCard';
 
 interface Project {
   id: string;
@@ -17,27 +17,7 @@ interface Project {
   slug: string;
 }
 
-interface ErrorGroup {
-  id: string;
-  fingerprint: string;
-  environment: string;
-  service: string;
-  routeTemplate: string | null;
-  method: string | null;
-  upstreamService: string | null;
-  errorType: string;
-  statusCode: number | null;
-  severity: 'info' | 'warning' | 'critical';
-  state: 'active' | 'ignored' | 'resolved';
-  occurrenceCount: number;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  linkedItemId: string | null;
-  linkedItemMessage: string | null;
-  sampleRequestId: string | null;
-  sampleTraceId: string | null;
-  grafanaLogsUrl: string | null;
-  grafanaTraceUrl: string | null;
+interface ErrorGroup extends ErrorGroupCardData {
   ignoredUntil: string | null;
   ignoreReason: string | null;
 }
@@ -65,20 +45,8 @@ function getInitialPage(params: URLSearchParams) {
   return Number.isInteger(page) && page > 0 ? page : 1;
 }
 
-function severityClass(severity: ErrorGroup['severity']) {
-  if (severity === 'critical') return 'bg-red-100 text-red-800';
-  if (severity === 'warning') return 'bg-yellow-100 text-yellow-800';
-  return 'bg-blue-100 text-blue-800';
-}
-
-function stateClass(state: ErrorGroup['state']) {
-  if (state === 'active') return 'bg-orange-100 text-orange-800';
-  if (state === 'ignored') return 'bg-gray-100 text-gray-700';
-  return 'bg-green-100 text-green-800';
-}
-
 export default function ErrorGroups() {
-  const { t, locale } = useTranslation();
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const currentSearchParams = searchParams.toString();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -235,38 +203,10 @@ export default function ErrorGroups() {
           <div className="divide-y divide-gray-100">
             {groups.map((group) => (
               <div key={group.id} className="p-4">
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <div className="mb-2 flex flex-wrap items-center gap-2">
-                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${severityClass(group.severity)}`}>{t(`errors.severities.${group.severity}`)}</span>
-                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${stateClass(group.state)}`}>{t(`errors.states.${group.state}`)}</span>
-                      <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{group.environment}</span>
-                      <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{group.service}</span>
-                    </div>
-                    <div className="text-sm font-semibold text-gray-900">{group.errorType}</div>
-                    <div className="mt-1 text-xs text-gray-500">
-                      {group.routeTemplate ? `${group.method || '*'} ${group.routeTemplate}` : t('errors.fields.noRoute')}
-                      {group.statusCode ? ` · HTTP ${group.statusCode}` : ''}
-                      {group.upstreamService ? ` · ${group.upstreamService}` : ''}
-                    </div>
-                    <div className="mt-2 grid gap-1 text-xs text-gray-500 md:grid-cols-2">
-                      <span>{t('errors.fields.occurrences')}: {group.occurrenceCount}</span>
-                      <span>{t('errors.fields.lastSeen')}: {formatDate(group.lastSeenAt, locale)}</span>
-                      <span className="font-mono break-all">{t('errors.fields.fingerprint')}: {group.fingerprint}</span>
-                      {group.sampleRequestId && <span className="font-mono break-all">{t('errors.fields.requestId')}: {group.sampleRequestId}</span>}
-                      {group.sampleTraceId && <span className="font-mono break-all">{t('errors.fields.traceId')}: {group.sampleTraceId}</span>}
-                    </div>
-                    {group.linkedItemId && (
-                      <Link to={`/items/${group.linkedItemId}`} className="mt-2 inline-flex text-xs font-medium text-blue-600 hover:underline">
-                        {t('errors.fields.linkedItem')}: {group.linkedItemMessage || `#${group.linkedItemId.slice(0, 8)}`}
-                      </Link>
-                    )}
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {group.grafanaLogsUrl && <a href={group.grafanaLogsUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-blue-600 hover:underline">{t('errors.links.logs')}</a>}
-                      {group.grafanaTraceUrl && <a href={group.grafanaTraceUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-blue-600 hover:underline">{t('errors.links.trace')}</a>}
-                    </div>
-                  </div>
-                  {canTriageSelectedErrors && (
+                <ErrorGroupCard
+                  group={group}
+                  showLinkedItem
+                  actions={canTriageSelectedErrors && (
                     <div className="flex gap-2 md:flex-col">
                       {group.state === 'ignored' ? (
                         <button onClick={() => handleUnignore(group)} disabled={actionId === group.id} className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
@@ -279,7 +219,7 @@ export default function ErrorGroups() {
                       )}
                     </div>
                   )}
-                </div>
+                />
               </div>
             ))}
           </div>

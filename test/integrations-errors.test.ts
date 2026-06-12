@@ -319,6 +319,38 @@ describe('Error integrations routes', () => {
     expect(item.message).not.toContain('prometheus:9090');
   });
 
+  it('stores Alertmanager troubleshooting labels when provided', async () => {
+    vi.stubEnv('SCOUT_ERROR_BRIDGE_SECRET', 'bridge-test-value');
+    const payload = bridgePayload('test-project', 'bridge-troubleshooting-labels');
+    payload.alerts[0]!.labels = {
+      route_template: '/api/orders/:id',
+      method: 'GET',
+      upstream_service: 'billing',
+      error_type: 'GatewayUpstream5xx',
+      status_code: '502',
+      status_class: '5xx',
+      request_id: 'req-bridge-test',
+      trace_id: 'trace-bridge-test',
+    };
+    payload.alerts[0]!.annotations = {
+      grafana_trace_url: 'https://grafana.example.test/explore?trace=test',
+    };
+
+    const res = await bridge(payload, 'bridge-test-value');
+    expect(res.status).toBe(202);
+
+    const group = ctx.db.select().from(errorGroups).get()!;
+    expect(group.routeTemplate).toBe('/api/orders/:id');
+    expect(group.method).toBe('GET');
+    expect(group.upstreamService).toBe('billing');
+    expect(group.errorType).toBe('GatewayUpstream5xx');
+    expect(group.statusCode).toBe(502);
+    expect(group.statusClass).toBe('5xx');
+    expect(group.sampleRequestId).toBe('req-bridge-test');
+    expect(group.sampleTraceId).toBe('trace-bridge-test');
+    expect(group.grafanaTraceUrl).toBe('https://grafana.example.test/explore?trace=test');
+  });
+
   it('does not create active error groups from resolved bridge alerts', async () => {
     vi.stubEnv('SCOUT_ERROR_BRIDGE_SECRET', 'bridge-test-value');
     const payload = bridgePayload('test-project', 'bridge-resolved-only');
