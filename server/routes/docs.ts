@@ -534,6 +534,7 @@ const spec = {
                   projectId: { type: 'string', format: 'uuid' },
                   itemType: { $ref: '#/components/schemas/ItemType', default: 'bug' },
                   message: { type: 'string', minLength: 3 },
+                  dedupeKey: { type: 'string', minLength: 8, maxLength: 200, description: 'Optional idempotency key. Reusing it shortly after a successful create returns the existing item instead of creating a duplicate.' },
                   priority: { $ref: '#/components/schemas/ItemPriority', default: 'medium', description: 'Ignored and stored as null for notes' },
                   labels: { type: 'array', items: { type: 'string', maxLength: 50 }, maxItems: 10 },
                   pageUrl: { type: 'string', maxLength: 500, nullable: true },
@@ -555,6 +556,14 @@ const spec = {
         responses: {
           201: {
             description: 'Item создан',
+            content: {
+              'application/json': {
+                schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Item' } } },
+              },
+            },
+          },
+          200: {
+            description: 'Duplicate submission accepted; existing recent item returned',
             content: {
               'application/json': {
                 schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Item' } } },

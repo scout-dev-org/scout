@@ -144,6 +144,7 @@ export const createItemSchema = z.object({
   projectId: uuidSchema,
   itemType: itemTypeSchema.default('bug'),
   message: z.string().min(3),
+  dedupeKey: z.string().min(8).max(200).optional(),
   priority: z.enum(['critical', 'high', 'medium', 'low']).default('medium'),
   labels: z.array(z.string().max(50)).max(10).optional(),
   pageUrl: z.string().max(500).nullish(),

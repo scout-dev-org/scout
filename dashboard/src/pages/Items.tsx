@@ -79,6 +79,17 @@ const ITEM_TYPE_KEYS: Record<string, string> = {
 
 const PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
 
+function createDedupeKey(): string {
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi?.randomUUID) return cryptoApi.randomUUID();
+  if (cryptoApi?.getRandomValues) {
+    const bytes = new Uint8Array(16);
+    cryptoApi.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 const FORM_CONTROL_CLASS =
   'h-9 rounded-md border border-gray-300 px-3 text-sm leading-5 shadow-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500';
 
@@ -293,6 +304,7 @@ export default function Items() {
         projectId: selectedProject,
         itemType: createType,
         message: createMessage.trim(),
+        dedupeKey: createDedupeKey(),
         ...(createType !== 'note' ? { priority: createPriority } : {}),
       });
       setShowCreateModal(false);

@@ -154,11 +154,13 @@ export const itemRoutes = new Hono()
       requireProjectPermission(user.id, user.role, data.projectId, 'create_item', c.get('apiKey'));
 
       const source = deriveItemSource(data, c.get('apiKey'));
-      const item = createItem({ ...data, reporterId: user.id, source });
-      logAudit({ userId: user.id, action: 'create_item', entityType: 'item', entityId: item.id, details: { projectId: data.projectId, itemType: item.itemType, source: item.source, priority: item.priority }, ipAddress: getClientIp(c) });
-      dispatchWebhooks(data.projectId, 'item.created', { item }).catch(() => {});
-      eventBus.publish({ type: 'item.created', projectId: data.projectId, payload: { item } });
-      return c.json({ data: item }, 201);
+      const { item, deduped } = createItem({ ...data, reporterId: user.id, source });
+      if (!deduped) {
+        logAudit({ userId: user.id, action: 'create_item', entityType: 'item', entityId: item.id, details: { projectId: data.projectId, itemType: item.itemType, source: item.source, priority: item.priority }, ipAddress: getClientIp(c) });
+        dispatchWebhooks(data.projectId, 'item.created', { item }).catch(() => {});
+        eventBus.publish({ type: 'item.created', projectId: data.projectId, payload: { item } });
+      }
+      return c.json({ data: item }, deduped ? 200 : 201);
     })
 
   // LIST — all roles

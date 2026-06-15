@@ -36,9 +36,10 @@ describe('Items routes', () => {
   }
 
   async function createTestItem(token?: string, projectId = ctx.projectId) {
+    const testId = randomUUID();
     const res = await post('/create', {
       projectId,
-      message: 'Test bug report',
+      message: `Test bug report ${testId}`,
       pageUrl: 'http://localhost:3000/page',
       cssSelector: '.btn-submit',
     }, token || ctx.adminToken);

@@ -1,6 +1,6 @@
 import { db } from '../db/client.js';
 import { scoutItems, scoutItemNotes, scoutItemEvidence, type User, type ItemStatus, type ItemPriority, type ItemType, type ItemSource } from '../db/schema.js';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, desc } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
@@ -58,6 +58,10 @@ const DONE_EVIDENCE_LEVELS = new Set<ItemEvidenceInput['level']>([
   'production_acceptance',
   'user_acceptance',
 ]);
+
+const ITEM_DEDUPE_WINDOW_MS = 10 * 60 * 1000;
+const ITEM_DEDUPE_CANDIDATE_LIMIT = 50;
+const SQLITE_UTC_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
 function now(): string {
   return new Date().toISOString();
@@ -232,6 +236,88 @@ function deleteFile(path: string | null): void {
   if (existsSync(fullPath)) unlinkSync(fullPath);
 }
 
+function normalizeDedupeString(value?: string | null): string {
+  return (value ?? '').trim();
+}
+
+function parseDbTimestamp(value: string): number {
+  if (SQLITE_UTC_TIMESTAMP_RE.test(value)) return Date.parse(`${value.replace(' ', 'T')}Z`);
+  return Date.parse(value);
+}
+
+function parseMetadata(metadata: string | null): Record<string, string> {
+  if (!metadata) return {};
+  try {
+    const parsed = JSON.parse(metadata) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function serializeMetadata(metadata?: Record<string, string> | null, dedupeKey?: string): string | null {
+  const next = { ...(metadata ?? {}) };
+  if (dedupeKey) next.dedupeKey = dedupeKey;
+  return Object.keys(next).length > 0 ? JSON.stringify(next) : null;
+}
+
+function findDuplicateItem(data: {
+  projectId: string;
+  itemType: ItemType;
+  source: ItemSource;
+  message: string;
+  reporterId: string;
+  priority: ItemPriority | null;
+  labelsJson: string | null;
+  pageUrl?: string | null;
+  pageRoute?: string | null;
+  componentFile?: string | null;
+  cssSelector?: string | null;
+  elementText?: string | null;
+  elementHtml?: string | null;
+  dedupeKey?: string;
+}): typeof scoutItems.$inferSelect | null {
+  const candidates = db.select().from(scoutItems)
+    .where(and(
+      eq(scoutItems.projectId, data.projectId),
+      eq(scoutItems.itemType, data.itemType),
+      eq(scoutItems.source, data.source),
+      eq(scoutItems.reporterId, data.reporterId),
+    ))
+    .orderBy(desc(scoutItems.createdAt))
+    .limit(ITEM_DEDUPE_CANDIDATE_LIMIT)
+    .all();
+
+  const cutoff = Date.now() - ITEM_DEDUPE_WINDOW_MS;
+  for (const candidate of candidates) {
+    const createdAt = parseDbTimestamp(candidate.createdAt);
+    if (Number.isNaN(createdAt) || createdAt < cutoff) continue;
+    if (candidate.status === 'cancelled') continue;
+
+    if (data.dedupeKey && parseMetadata(candidate.metadata).dedupeKey === data.dedupeKey) {
+      return candidate;
+    }
+
+    const isSameFingerprint =
+      normalizeDedupeString(candidate.message) === normalizeDedupeString(data.message) &&
+      candidate.priority === data.priority &&
+      candidate.labels === data.labelsJson &&
+      normalizeDedupeString(candidate.pageUrl) === normalizeDedupeString(data.pageUrl) &&
+      normalizeDedupeString(candidate.pageRoute) === normalizeDedupeString(data.pageRoute) &&
+      normalizeDedupeString(candidate.componentFile) === normalizeDedupeString(data.componentFile) &&
+      normalizeDedupeString(candidate.cssSelector) === normalizeDedupeString(data.cssSelector) &&
+      normalizeDedupeString(candidate.elementText) === normalizeDedupeString(data.elementText) &&
+      normalizeDedupeString(candidate.elementHtml) === normalizeDedupeString(data.elementHtml);
+
+    if (isSameFingerprint) return candidate;
+  }
+
+  return null;
+}
+
 export function validateTransition(from: ItemStatus, to: ItemStatus): void {
   if (!VALID_TRANSITIONS[from]?.includes(to)) {
     throw new ValidationError(`Invalid status transition: ${from} → ${to}`, 'INVALID_STATUS_TRANSITION');
@@ -243,6 +329,7 @@ export function createItem(data: {
   itemType?: ItemType;
   source?: ItemSource;
   message: string;
+  dedupeKey?: string;
   reporterId: string;
   priority?: ItemPriority;
   labels?: string[];
@@ -257,7 +344,32 @@ export function createItem(data: {
   screenshot?: string | null;
   sessionRecording?: string | null;
   metadata?: Record<string, string> | null;
-}) {
+}): { item: typeof scoutItems.$inferSelect; deduped: boolean } {
+  const itemType = data.itemType ?? 'bug';
+  const priority = itemType === 'note' ? null : (data.priority ?? 'medium');
+  const source = data.source ?? 'widget';
+  const labelsJson = data.labels ? JSON.stringify(data.labels) : null;
+  const dedupeKey = data.dedupeKey?.trim();
+  const metadataJson = serializeMetadata(data.metadata, dedupeKey);
+
+  const duplicate = findDuplicateItem({
+    projectId: data.projectId,
+    itemType,
+    source,
+    message: data.message,
+    reporterId: data.reporterId,
+    priority,
+    labelsJson,
+    pageUrl: data.pageUrl,
+    pageRoute: data.pageRoute,
+    componentFile: data.componentFile,
+    cssSelector: data.cssSelector,
+    elementText: data.elementText,
+    elementHtml: data.elementHtml,
+    dedupeKey,
+  });
+  if (duplicate) return { item: duplicate, deduped: true };
+
   // Save files before the transaction (file I/O outside DB transaction)
   let screenshotPath: string | null = null;
   let sessionRecordingPath: string | null = null;
@@ -269,7 +381,7 @@ export function createItem(data: {
     try {
       sessionRecordingPath = saveRecording(data.sessionRecording, 'recordings');
     } catch (err) {
-      if (data.source !== 'widget' || !(err instanceof ValidationError) || err.code !== 'INVALID_SESSION_RECORDING') {
+      if (source !== 'widget' || !(err instanceof ValidationError) || err.code !== 'INVALID_SESSION_RECORDING') {
         throw err;
       }
       logger.warn({ projectId: data.projectId }, 'Discarding invalid optional widget session recording');
@@ -277,19 +389,17 @@ export function createItem(data: {
   }
 
   const id = randomUUID();
-  const itemType = data.itemType ?? 'bug';
-  const priority = itemType === 'note' ? null : (data.priority ?? 'medium');
 
   try {
-    return db.transaction((tx) => {
+    const item = db.transaction((tx) => {
       tx.insert(scoutItems).values({
         id,
         projectId: data.projectId,
         itemType,
-        source: data.source ?? 'widget',
+        source,
         message: data.message,
         priority,
-        labels: data.labels ? JSON.stringify(data.labels) : null,
+        labels: labelsJson,
         pageUrl: data.pageUrl ?? null,
         pageRoute: data.pageRoute ?? null,
         componentFile: data.componentFile ?? null,
@@ -300,12 +410,13 @@ export function createItem(data: {
         viewportHeight: data.viewportHeight ?? null,
         screenshotPath,
         sessionRecordingPath,
-        metadata: data.metadata ? JSON.stringify(data.metadata) : null,
+        metadata: metadataJson,
         reporterId: data.reporterId,
       }).run();
 
       return tx.select().from(scoutItems).where(eq(scoutItems.id, id)).get()!;
     });
+    return { item, deduped: false };
   } catch (err) {
     // If insert fails, clean up orphaned files
     deleteFile(screenshotPath);
