@@ -61,6 +61,7 @@ const DONE_EVIDENCE_LEVELS = new Set<ItemEvidenceInput['level']>([
 
 const ITEM_DEDUPE_WINDOW_MS = 10 * 60 * 1000;
 const ITEM_DEDUPE_CANDIDATE_LIMIT = 50;
+const DEBUG_CONTEXT_MAX_JSON_CHARS = 200_000;
 const SQLITE_UTC_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
 function now(): string {
@@ -264,6 +265,33 @@ function serializeMetadata(metadata?: Record<string, string> | null, dedupeKey?:
   return Object.keys(next).length > 0 ? JSON.stringify(next) : null;
 }
 
+function serializeDebugContext(debugContext?: Record<string, unknown> | null, sessionRecordingPath?: string | null): string | null {
+  if (!debugContext) return null;
+
+  try {
+    const next: Record<string, unknown> = { ...debugContext };
+    const summary = next.recordingSummary;
+
+    if (summary && typeof summary === 'object' && !Array.isArray(summary)) {
+      next.recordingSummary = {
+        ...(summary as Record<string, unknown>),
+        hasRecording: Boolean(sessionRecordingPath),
+        recordingPath: sessionRecordingPath ?? null,
+      };
+    } else if (sessionRecordingPath) {
+      next.recordingSummary = {
+        hasRecording: true,
+        recordingPath: sessionRecordingPath,
+      };
+    }
+
+    const serialized = JSON.stringify(next);
+    return serialized.length <= DEBUG_CONTEXT_MAX_JSON_CHARS ? serialized : null;
+  } catch {
+    return null;
+  }
+}
+
 function findDuplicateItem(data: {
   projectId: string;
   itemType: ItemType;
@@ -344,6 +372,7 @@ export function createItem(data: {
   screenshot?: string | null;
   sessionRecording?: string | null;
   metadata?: Record<string, string> | null;
+  debugContext?: Record<string, unknown> | null;
 }): { item: typeof scoutItems.$inferSelect; deduped: boolean } {
   const itemType = data.itemType ?? 'bug';
   const priority = itemType === 'note' ? null : (data.priority ?? 'medium');
@@ -388,6 +417,8 @@ export function createItem(data: {
     }
   }
 
+  const debugContextJson = serializeDebugContext(data.debugContext, sessionRecordingPath);
+
   const id = randomUUID();
 
   try {
@@ -411,6 +442,7 @@ export function createItem(data: {
         screenshotPath,
         sessionRecordingPath,
         metadata: metadataJson,
+        debugContext: debugContextJson,
         reporterId: data.reporterId,
       }).run();
 

@@ -5,6 +5,7 @@ import { pickElement, type PickedElement } from './element-picker';
 import { createPanel, showPanel, hidePanel, attachPanelEvents, type PanelCallbacks } from './panel';
 import { captureScreenshot } from './screenshot';
 import { startRecording, pauseRecording, resumeRecording } from './recorder';
+import { startDebugContextCapture } from './debug-context';
 import { t } from './i18n';
 
 interface ScoutConfig {
@@ -71,6 +72,7 @@ async function init(): Promise<void> {
 
   // --- Start rrweb recorder ---
   startRecording();
+  startDebugContextCapture({ scoutRootId: 'scout-widget-root', apiUrl });
 
   // --- Create overlay for element picker ---
   const overlay = document.createElement('div');

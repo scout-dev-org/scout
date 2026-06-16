@@ -159,6 +159,7 @@ export const createItemSchema = z.object({
   // Full validation happens in the item service so widget reports can degrade gracefully.
   sessionRecording: z.string().max(3_000_000).nullish(),
   metadata: z.record(z.string()).nullish(),               // auto-captured environment data
+  debugContext: z.record(z.unknown()).nullish(),           // structured browser diagnostics
 });
 
 export const listItemsSchema = z.object({

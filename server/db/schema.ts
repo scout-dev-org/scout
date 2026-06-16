@@ -72,6 +72,7 @@ export const scoutItems = sqliteTable('scout_items', {
   priority: text('priority', { enum: ['critical', 'high', 'medium', 'low'] }).default('medium'),
   labels: text('labels'), // JSON array of strings
   metadata: text('metadata'),  // JSON string: auto-captured environment data (browser, OS, etc.)
+  debugContext: text('debug_context'), // JSON string: browser diagnostics and rrweb recording summary
   reporterId: text('reporter_id').references(() => users.id, { onDelete: 'set null' }),
   assigneeId: text('assignee_id').references(() => users.id, { onDelete: 'set null' }),
   resolvedById: text('resolved_by_id').references(() => users.id, { onDelete: 'set null' }),

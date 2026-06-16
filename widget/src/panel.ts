@@ -1,6 +1,7 @@
 import type { PickedElement } from './element-picker';
 import { SCREENSHOT_MIME } from './screenshot';
-import { getRecordingCompressed, resetBuffer, isRecordingAvailable } from './recorder';
+import { getRecordingCompressed, getRecordingSummary, resetBuffer, isRecordingAvailable } from './recorder';
+import { getDebugContextPayload } from './debug-context';
 import { ensureToken, getUser, clearAuth, resolveProjectId, resetProjectCache } from './auth';
 import { t } from './i18n';
 
@@ -593,6 +594,7 @@ export function attachPanelEvents(
 
       // Auto-capture environment metadata (Marker.io/Usersnap pattern)
       const metadata = collectMetadata();
+      const debugContext = getDebugContextPayload(getRecordingSummary(Boolean(sessionRecording)));
 
       const body = {
         projectId,
@@ -603,6 +605,7 @@ export function attachPanelEvents(
         viewportWidth: p.viewportWidth,
         viewportHeight: p.viewportHeight,
         metadata,
+        debugContext,
         ...(mode === 'bug' ? {
           priority: elements.prioritySelect.value,
           cssSelector: p.cssSelector,

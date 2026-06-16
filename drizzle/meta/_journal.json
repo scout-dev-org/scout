@@ -85,6 +85,13 @@
       "when": 1780963200000,
       "tag": "0011_email_digest_deliveries",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1781592763000,
+      "tag": "0012_debug_context",
+      "breakpoints": true
     }
   ]
 }

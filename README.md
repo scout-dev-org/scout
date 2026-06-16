@@ -22,7 +22,7 @@
 
 ## What is Scout?
 
-Scout is a self-hosted tracker for teams that want high-quality bug reports and a clean handoff to humans or coding agents. Testers report bugs via an embeddable widget that captures element context, screenshots, and session recordings. While testing, they can also save lightweight notes without turning them into committed work. Runtime integrations can group operational errors and link them to normal Scout items. AI agents can triage actionable notes, inspect linked runtime error context, link related items, add comments, and move bugs/tasks through the workflow with evidence.
+Scout is a self-hosted tracker for teams that want high-quality bug reports and a clean handoff to humans or coding agents. Testers report bugs via an embeddable widget that captures element context, browser debug context, screenshots, and rrweb session recordings. While testing, they can also save lightweight notes without turning them into committed work. Runtime integrations can group operational errors and link them to normal Scout items. AI agents can triage actionable notes, inspect linked runtime error context, link related items, add comments, and move bugs/tasks through the workflow with evidence.
 
 ```
 Tester clicks element  →  Widget creates bug with context + screenshot + recording
@@ -41,8 +41,8 @@ Tester saves note     →  Widget stores page-level observation without workflow
 
 | Area | Details |
 |------|---------|
-| **Widget** | Bug-first reporting, optional non-bug notes, Shadow DOM isolation, element picker with instruction banner, html2canvas-pro screenshot with element highlight, rrweb session recording (60s buffer), cross-domain SSO |
-| **Dashboard** | React SPA, bug/note/task items, runtime error groups, manual creation, note-to-task triage, rrweb session player, items/projects/users/webhooks management, locale switcher |
+| **Widget** | Bug-first reporting, optional non-bug notes, Shadow DOM isolation, element picker with instruction banner, html2canvas-pro screenshot with element highlight, structured browser debug context (60s rolling buffer), rrweb session recording (60s buffer), cross-domain SSO |
+| **Dashboard** | React SPA, bug/note/task items, runtime error groups, manual creation, note-to-task triage, debug context viewer, rrweb session player with recording summary, items/projects/users/webhooks management, locale switcher |
 | **i18n** | Russian, English, Uzbek (Latin). Dashboard + widget. Server error codes translated on client |
 | **Agent workflows** | Manual agent skill for autonomous bug/task work, including AI triage that converts actionable notes into tasks, runtime error context handling, evidence-backed status updates, and safe non-production push/staging completion without background automation |
 | **Notifications** | Daily per-user email digest over SMTP with concise counts for created items, status transitions, assignments, type changes, affected projects, and current statuses |
@@ -92,9 +92,9 @@ pnpm dev:all     # API + dashboard + widget (hot reload)
 
 The dashboard shows a ready-to-copy snippet for each project under **Projects** → **Manage integrations**.
 
-**Bug reports capture:** CSS selector, element text/HTML, page URL, viewport size, browser/OS metadata, screenshot (with element highlight), session recording (last 60 seconds).
+**Bug reports capture:** CSS selector, element text/HTML, page URL, viewport size, browser/OS metadata, structured debug context (current page, navigation, user actions, console warnings/errors, fetch/XHR request summaries, performance timing), screenshot (with element highlight), rrweb session recording (last 60 seconds), and a compact rrweb recording summary for agents.
 
-**Notes:** The widget stays bug-first, but the picker banner and panel include a secondary “not a bug” note flow. Notes save the current page context without requiring an element, priority, screenshot, or session recording. In the dashboard, humans or the Scout AI workflow can convert an actionable note into a task when the expected work is clear.
+**Notes:** The widget stays bug-first, but the picker banner and panel include a secondary “not a bug” note flow. Notes save the current page context and structured debug context without requiring an element, priority, screenshot, or session recording. In the dashboard, humans or the Scout AI workflow can convert an actionable note into a task when the expected work is clear.
 
 **SSO:** Users log in once — session shared across all sites via cookie (subdomains) or popup (cross-domain).
 
@@ -112,7 +112,7 @@ The dashboard shows a ready-to-copy snippet for each project under **Projects** 
 
 Responsive React SPA served from the same port as the API.
 
-- **Items** — Bug/note/task list with human queue tabs (`Open`, `In Progress`, `Needs Review`, `Needs Acceptance`, `Accepted`, `Archived`), type/priority filters, search, pagination, manual creation, and note-to-task triage for humans or AI agents. Detail view with screenshot lightbox, rrweb session player, notes timeline, related items, linked runtime errors, resolve modal, and simple human verify/request-changes actions
+- **Items** — Bug/note/task list with human queue tabs (`Open`, `In Progress`, `Needs Review`, `Needs Acceptance`, `Accepted`, `Archived`), type/priority filters, search, pagination, manual creation, and note-to-task triage for humans or AI agents. Detail view with debug context, screenshot lightbox, rrweb session player plus recording summary, notes timeline, related items, linked runtime errors, resolve modal, and simple human verify/request-changes actions
 - **Errors** — Runtime error groups with environment/service/fingerprint, route template, status/error classification, occurrence counts, linked Scout item, and Grafana/Tempo context links when provided by integrations
 - **Projects** — CRUD with allowed origins for CORS/SSO and links to per-project integrations
 - **Users** — CRUD with system roles and per-project role assignment
@@ -142,7 +142,7 @@ User APIs use `projectRoles` for per-project access assignment.
 
 ## Agent Skill
 
-Scout also ships an agent skill for manual bug-tracker work. It is useful when a coding agent should take Scout work, triage related items, inspect linked runtime error context when present, reproduce bugs, fix them in a local repository, verify results, commit and push safe non-production branches when repo policy allows, run staging verification when a canonical path exists, and update Scout notes/statuses with structured evidence without relying on background automation.
+Scout also ships an agent skill for manual bug-tracker work. It is useful when a coding agent should take Scout work, triage related items, inspect linked runtime error context and browser debug context when present, use rrweb session replay as DOM/event evidence, reproduce bugs, fix them in a local repository, verify results, commit and push safe non-production branches when repo policy allows, run staging verification when a canonical path exists, and update Scout notes/statuses with structured evidence without relying on background automation.
 
 When operating from this skill, the agent should always lead the project like a responsible maintainer and default to completing all solvable work itself. It should not ask for routine choices about prioritization, verification, push, staging deploy, or Scout handoff. Hard gates remain for production releases, external communications, destructive user-data actions, secrets exposure, live-money/provider actions, and human acceptance. Arguments after `/scout` choose the work scope, not a weaker behavior profile.
 

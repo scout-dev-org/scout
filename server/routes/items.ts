@@ -63,7 +63,7 @@ function getItemPermissions(item: typeof scoutItems.$inferSelect, user: typeof u
 function deriveItemSource(data: ReturnType<typeof createItemSchema.parse>, apiKey: ApiKey | null): ItemSource {
   if (apiKey?.purpose === 'agent') return 'agent';
   if (apiKey) return 'api';
-  if (data.pageUrl || data.cssSelector || data.screenshot || data.sessionRecording) return 'widget';
+  if (data.pageUrl || data.cssSelector || data.screenshot || data.sessionRecording || data.debugContext) return 'widget';
   return 'dashboard';
 }
 

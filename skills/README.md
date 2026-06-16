@@ -4,13 +4,15 @@ This directory contains the canonical agent skills for working with Scout.
 
 ## `scout-manual-workflow`
 
-Use this skill when an AI coding agent should take Scout work and handle it manually like a professional engineer: triage, reproduce, diagnose, inspect linked runtime error context when present, fix, verify, commit/push/deploy through safe canonical non-production paths when allowed, update Scout notes/statuses, and handle related or duplicate items without asking for routine workflow choices.
+Use this skill when an AI coding agent should take Scout work and handle it manually like a professional engineer: triage, reproduce, diagnose, inspect linked runtime error context and browser `debugContext`/`recordingSummary` when present, use rrweb session replay as DOM/event evidence when needed, fix, verify, commit/push/deploy through safe canonical non-production paths when allowed, update Scout notes/statuses, and handle related or duplicate items without asking for routine workflow choices.
 
 ## OpenCode Commands
 
 Scout ships one OpenCode slash command in `.opencode/commands/`: `/scout`. It is a thin entrypoint into `scout-manual-workflow`; keep lifecycle rules in the skill and let the agent infer full active queue, single-item, single-next, needs-review follow-up, changes-requested follow-up, runtime-error follow-up, or done/verified audit scope from arguments and live queue state. Every invocation uses maintainer-level ownership; arguments choose scope, not a weaker behavior profile. With no arguments, `/scout` defaults to full active queue scope and solves every item that can honestly move further.
 
 The workflow is schema-aware: status transitions to `review` or `done` should use structured evidence with `result`, `level`, `coverage`, `scenario`, `action`, `visibleResult`, and item-specific `acceptanceScope`. `review` also requires a real commit SHA or MR URL. `done` means the AI/operator work is ready for human acceptance via `/api/items/verify`; rejected work returns through `/api/items/request-changes` as `changes_requested`.
+
+Widget-created items may include `debugContext`, which stores the captured page, navigation, user actions, console warnings/errors, failed/slow network summaries, performance timing, and a compact rrweb `recordingSummary`. The `/scout` workflow should inspect those structured fields before downloading a full rrweb recording; open the dashboard player or parse the recording JSON only when the bug depends on path, timing, navigation, redirects, or missing context.
 
 Human queue tabs are status groups, not separate states: `Open` = `new`, `In Progress` = `in_progress`, `Needs Review` = `review` + `changes_requested`, `Needs Acceptance` = `done`, `Accepted` = `verified`, and `Archived` = `cancelled`.
 

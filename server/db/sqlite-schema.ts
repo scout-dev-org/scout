@@ -98,6 +98,7 @@ const TABLE_SPECS: TableSpec[] = [
       priority TEXT DEFAULT 'medium',
       labels TEXT,
       metadata TEXT,
+      debug_context TEXT,
       reporter_id TEXT REFERENCES users(id) ON DELETE SET NULL,
       assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL,
       resolved_by_id TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -115,7 +116,7 @@ const TABLE_SPECS: TableSpec[] = [
       'CREATE INDEX idx_items_project_created ON scout_items(project_id, created_at)',
       'CREATE INDEX idx_items_assignee ON scout_items(assignee_id)',
     ],
-    copyColumns: ['id', 'project_id', 'item_type', 'source', 'message', 'status', 'page_url', 'page_route', 'component_file', 'css_selector', 'element_text', 'element_html', 'viewport_width', 'viewport_height', 'screenshot_path', 'session_recording_path', 'priority', 'labels', 'metadata', 'reporter_id', 'assignee_id', 'resolved_by_id', 'resolution_note', 'branch_name', 'mr_url', 'attempt_count', 'resolved_at', 'created_at', 'updated_at'],
+    copyColumns: ['id', 'project_id', 'item_type', 'source', 'message', 'status', 'page_url', 'page_route', 'component_file', 'css_selector', 'element_text', 'element_html', 'viewport_width', 'viewport_height', 'screenshot_path', 'session_recording_path', 'priority', 'labels', 'metadata', 'debug_context', 'reporter_id', 'assignee_id', 'resolved_by_id', 'resolution_note', 'branch_name', 'mr_url', 'attempt_count', 'resolved_at', 'created_at', 'updated_at'],
     primaryKey: ['id'],
   },
   {

@@ -6,7 +6,7 @@ import { api } from '../lib/api';
 import { formatDate } from '../lib/date';
 import { isAdmin, storageUrl } from '../lib/auth';
 import { useSSE, type SSEEventType } from '../hooks/useSSE';
-import { useTranslation } from '../i18n';
+import { useTranslation, type Locale } from '../i18n';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
 import ItemTypeBadge from '../components/ItemTypeBadge';
@@ -111,6 +111,7 @@ interface ItemData {
   screenshotPath: string | null;
   sessionRecordingPath: string | null;
   metadata: string | null;
+  debugContext: string | null;
   reporterName: string | null;
   assigneeName: string | null;
   assigneeId: string | null;
@@ -175,6 +176,38 @@ interface ParsedMetadata {
   devicePixelRatio?: string;
   screenResolution?: string;
   timezone?: string;
+}
+
+interface RecordingSummary {
+  hasRecording?: boolean;
+  recordingDurationMs?: number;
+  eventCount?: number;
+  firstTimestamp?: number | null;
+  lastTimestamp?: number | null;
+  fullSnapshotCount?: number;
+  incrementalEventCount?: number;
+  recordingPath?: string | null;
+  importantEvents?: Array<{ ts?: number; type?: string; summary?: string }>;
+}
+
+interface DebugContext {
+  version?: number;
+  capturedAt?: string;
+  page?: {
+    url?: string;
+    title?: string;
+    referrer?: string;
+    route?: string;
+    visibilityState?: string;
+    viewport?: { width?: number; height?: number };
+    screen?: { width?: number; height?: number; devicePixelRatio?: string };
+  };
+  navigation?: Array<{ ts?: number; type?: string; url?: string; title?: string }>;
+  actions?: Array<{ ts?: number; type?: string; selector?: string; text?: string; tag?: string; url?: string }>;
+  console?: Array<{ ts?: number; level?: string; message?: string; stack?: string; url?: string }>;
+  network?: Array<{ ts?: number; method?: string; url?: string; status?: number; ok?: boolean; durationMs?: number; requestBody?: string; responseBody?: string; error?: string }>;
+  performance?: { navigationType?: string; loadTimeMs?: number; domContentLoadedMs?: number };
+  recordingSummary?: RecordingSummary;
 }
 
 const noteTypeColors: Record<string, string> = {
@@ -242,6 +275,41 @@ function parseMetadata(raw: string | null): ParsedMetadata | null {
   } catch {
     return null;
   }
+}
+
+function parseDebugContext(raw: string | null): DebugContext | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) return parsed as DebugContext;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function formatDurationMs(ms: number | null | undefined): string {
+  if (!ms || ms < 0) return '0ms';
+  if (ms < 1_000) return `${Math.round(ms)}ms`;
+  const seconds = Math.round(ms / 100) / 10;
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  return `${minutes}m ${rest}s`;
+}
+
+function formatDebugTimestamp(ts: number | null | undefined, locale: Locale): string {
+  if (!ts) return '—';
+  return formatDate(new Date(ts).toISOString(), locale);
+}
+
+function shortText(value: string | null | undefined, max = 160): string {
+  if (!value) return '';
+  return value.length > max ? `${value.slice(0, max)}...` : value;
+}
+
+function hasRecordingStats(summary: RecordingSummary | null | undefined): boolean {
+  return Boolean(summary && (summary.hasRecording || summary.eventCount || summary.recordingDurationMs));
 }
 
 interface AutoNote {
@@ -857,6 +925,16 @@ export default function ItemDetail() {
     : null;
 
   const meta = parseMetadata(item.metadata);
+  const debugContext = parseDebugContext(item.debugContext);
+  const debugContextInvalid = Boolean(item.debugContext && !debugContext);
+  const navigationEntries = Array.isArray(debugContext?.navigation) ? debugContext.navigation : [];
+  const actionEntries = Array.isArray(debugContext?.actions) ? debugContext.actions : [];
+  const consoleIssues = (Array.isArray(debugContext?.console) ? debugContext.console : [])
+    .filter((entry) => entry.level === 'error' || entry.level === 'warn');
+  const networkIssues = (Array.isArray(debugContext?.network) ? debugContext.network : [])
+    .filter((entry) => entry.error || entry.ok === false || (entry.status ?? 0) >= 400 || (entry.durationMs ?? 0) >= 1_000);
+  const recordingSummary = debugContext?.recordingSummary ?? null;
+  const rawDebugContext = debugContext ? JSON.stringify(debugContext, null, 2) : item.debugContext;
   const itemText = splitItemMessage(item.message);
 
   const isTerminal = item.status === 'verified' || item.status === 'cancelled';
@@ -1182,6 +1260,160 @@ export default function ItemDetail() {
         </div>
       )}
 
+      {(debugContext || debugContextInvalid) && (
+        <div className="mb-4 md:mb-6 rounded-lg border border-slate-200 bg-white p-3 md:p-4">
+          <div className="mb-3 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+            <h3 className="text-sm font-medium text-gray-800">{t('items.detail.debug.title')}</h3>
+            {debugContext?.capturedAt && (
+              <span className="text-xs text-gray-400">
+                {t('items.detail.debug.capturedAt', { value: formatDate(debugContext.capturedAt, locale) })}
+              </span>
+            )}
+          </div>
+
+          {debugContextInvalid ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              {t('items.detail.debug.invalid')}
+            </div>
+          ) : debugContext && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <InfoRow label={t('items.detail.debug.currentUrl')} value={debugContext.page?.url} link />
+                <InfoRow label={t('items.detail.debug.titleLabel')} value={debugContext.page?.title} />
+                <InfoRow label={t('items.detail.debug.route')} value={debugContext.page?.route} mono />
+                <InfoRow label={t('items.detail.debug.visibility')} value={debugContext.page?.visibilityState} />
+                <InfoRow
+                  label={t('items.detail.debug.viewport')}
+                  value={debugContext.page?.viewport?.width && debugContext.page?.viewport?.height ? `${debugContext.page.viewport.width}×${debugContext.page.viewport.height}` : null}
+                />
+                <InfoRow
+                  label={t('items.detail.debug.performance')}
+                  value={debugContext.performance ? `${debugContext.performance.navigationType ?? 'unknown'} · DCL ${formatDurationMs(debugContext.performance.domContentLoadedMs)} · load ${formatDurationMs(debugContext.performance.loadTimeMs)}` : null}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div>
+                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{t('items.detail.debug.navigation')}</h4>
+                  {navigationEntries.length === 0 ? (
+                    <p className="text-sm text-gray-400">{t('items.detail.debug.empty')}</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {navigationEntries.slice(-8).map((entry, index) => (
+                        <div key={`${entry.ts}-${index}`} className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-xs">
+                          <div className="mb-1 flex flex-wrap items-center gap-2 text-gray-500">
+                            <span className="rounded bg-white px-1.5 py-0.5 font-mono text-gray-700">{entry.type ?? 'navigation'}</span>
+                            <span>{formatDebugTimestamp(entry.ts, locale)}</span>
+                          </div>
+                          <div className="break-all font-mono text-gray-700">{entry.url}</div>
+                          {entry.title && <div className="mt-1 text-gray-500">{shortText(entry.title)}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{t('items.detail.debug.actions')}</h4>
+                  {actionEntries.length === 0 ? (
+                    <p className="text-sm text-gray-400">{t('items.detail.debug.empty')}</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {actionEntries.slice(-10).map((entry, index) => (
+                        <div key={`${entry.ts}-${index}`} className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-xs">
+                          <div className="mb-1 flex flex-wrap items-center gap-2 text-gray-500">
+                            <span className="rounded bg-white px-1.5 py-0.5 font-mono text-gray-700">{entry.type ?? 'action'}</span>
+                            <span>{entry.tag}</span>
+                            <span>{formatDebugTimestamp(entry.ts, locale)}</span>
+                          </div>
+                          {entry.text && <div className="text-gray-700">{shortText(entry.text)}</div>}
+                          {entry.selector && <div className="mt-1 break-all font-mono text-gray-500">{entry.selector}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div>
+                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{t('items.detail.debug.console')}</h4>
+                  {consoleIssues.length === 0 ? (
+                    <p className="text-sm text-gray-400">{t('items.detail.debug.noConsoleIssues')}</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {consoleIssues.slice(-8).map((entry, index) => (
+                        <div key={`${entry.ts}-${index}`} className="rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-900">
+                          <div className="mb-1 flex flex-wrap items-center gap-2 text-red-700">
+                            <span className="rounded bg-white px-1.5 py-0.5 font-mono">{entry.level}</span>
+                            <span>{formatDebugTimestamp(entry.ts, locale)}</span>
+                          </div>
+                          <div className="break-words">{shortText(entry.message, 260)}</div>
+                          {entry.stack && <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded bg-white/70 p-2 font-mono text-[11px] text-red-800">{shortText(entry.stack, 800)}</pre>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{t('items.detail.debug.network')}</h4>
+                  {networkIssues.length === 0 ? (
+                    <p className="text-sm text-gray-400">{t('items.detail.debug.noNetworkIssues')}</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {networkIssues.slice(-8).map((entry, index) => (
+                        <div key={`${entry.ts}-${index}`} className="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                          <div className="mb-1 flex flex-wrap items-center gap-2 text-amber-700">
+                            <span className="rounded bg-white px-1.5 py-0.5 font-mono">{entry.method ?? 'GET'}</span>
+                            {entry.status !== undefined && <span>{entry.status}</span>}
+                            {entry.durationMs !== undefined && <span>{formatDurationMs(entry.durationMs)}</span>}
+                            <span>{formatDebugTimestamp(entry.ts, locale)}</span>
+                          </div>
+                          <div className="break-all font-mono text-amber-900">{entry.url}</div>
+                          {entry.error && <div className="mt-1 text-red-700">{shortText(entry.error)}</div>}
+                          {entry.responseBody && <div className="mt-1 break-words text-amber-800">{shortText(entry.responseBody, 260)}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {recordingSummary && (
+                <div className="rounded-md border border-blue-100 bg-blue-50 p-3">
+                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-700">{t('items.detail.debug.recordingSummary')}</h4>
+                  <div className="grid grid-cols-2 gap-3 text-xs md:grid-cols-4">
+                    <InfoRow label={t('items.detail.debug.hasRecording')} value={recordingSummary.hasRecording ? t('common.yes') : t('common.no')} />
+                    <InfoRow label={t('items.detail.debug.duration')} value={formatDurationMs(recordingSummary.recordingDurationMs)} />
+                    <InfoRow label={t('items.detail.debug.eventCount')} value={String(recordingSummary.eventCount ?? 0)} />
+                    <InfoRow label={t('items.detail.debug.snapshots')} value={`${recordingSummary.fullSnapshotCount ?? 0} / ${recordingSummary.incrementalEventCount ?? 0}`} />
+                  </div>
+                  {Array.isArray(recordingSummary.importantEvents) && recordingSummary.importantEvents.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {recordingSummary.importantEvents.slice(0, 8).map((entry, index) => (
+                        <span key={`${entry.ts}-${index}`} className="rounded-full bg-white px-2 py-1 text-xs text-blue-800">
+                          {entry.type}: {shortText(entry.summary, 80)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {rawDebugContext && (
+                <details className="rounded-md border border-gray-200 bg-gray-50">
+                  <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-gray-600">{t('items.detail.debug.raw')}</summary>
+                  <pre className="max-h-96 overflow-auto border-t border-gray-200 p-3 text-xs text-gray-700">
+                    <code>{rawDebugContext}</code>
+                  </pre>
+                </details>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {item.elementHtml && (
         <div className="mb-4 md:mb-6">
           <h3 className="mb-2 text-sm font-medium text-gray-700">
@@ -1422,6 +1654,15 @@ export default function ItemDetail() {
           <h3 className="mb-2 text-sm font-medium text-gray-700">
             {t('items.detail.recording')}
           </h3>
+          {hasRecordingStats(recordingSummary) && (
+            <div className="mb-3 grid grid-cols-2 gap-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs md:grid-cols-4">
+              <InfoRow label={t('items.detail.debug.duration')} value={formatDurationMs(recordingSummary?.recordingDurationMs)} />
+              <InfoRow label={t('items.detail.debug.eventCount')} value={String(recordingSummary?.eventCount ?? 0)} />
+              <InfoRow label={t('items.detail.debug.firstTimestamp')} value={formatDebugTimestamp(recordingSummary?.firstTimestamp, locale)} />
+              <InfoRow label={t('items.detail.debug.lastTimestamp')} value={formatDebugTimestamp(recordingSummary?.lastTimestamp, locale)} />
+              <InfoRow label={t('items.detail.debug.eventCategories')} value={`${t('items.detail.debug.fullSnapshots')}: ${recordingSummary?.fullSnapshotCount ?? 0}, ${t('items.detail.debug.incrementalEvents')}: ${recordingSummary?.incrementalEventCount ?? 0}, ${t('items.detail.debug.importantEvents')}: ${recordingSummary?.importantEvents?.length ?? 0}`} />
+            </div>
+          )}
           <SessionPlayer recordingPath={recordingUrl} />
         </div>
       )}

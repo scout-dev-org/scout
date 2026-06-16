@@ -16,6 +16,7 @@
 import type { eventWithTime, recordOptions } from 'rrweb';
 import { record } from 'rrweb';
 import { gzipSync } from 'fflate';
+import type { RecordingSummary } from './debug-context';
 
 // --- Constants ---
 
@@ -53,6 +54,11 @@ let throttleCount = 0;
 const EVENT_TYPE_FULL_SNAPSHOT = 2;
 const EVENT_TYPE_META = 4;
 const EVENT_TYPE_INCREMENTAL_SNAPSHOT = 3;
+const INCREMENTAL_SOURCE_MUTATION = 0;
+const INCREMENTAL_SOURCE_MOUSE_INTERACTION = 2;
+const INCREMENTAL_SOURCE_SCROLL = 3;
+const INCREMENTAL_SOURCE_INPUT = 5;
+const MOUSE_INTERACTION_CLICK = 2;
 
 // --- Runtime patches ---
 
@@ -358,4 +364,57 @@ export function isRecording(): boolean {
 
 export function isRecordingAvailable(): boolean {
   return !recordingFailed;
+}
+
+export function getRecordingSummary(hasRecording: boolean): RecordingSummary {
+  if (!hasRecording || events.length === 0) {
+    return {
+      hasRecording: false,
+      recordingDurationMs: 0,
+      eventCount: 0,
+      firstTimestamp: null,
+      lastTimestamp: null,
+      fullSnapshotCount: 0,
+      incrementalEventCount: 0,
+      recordingPath: null,
+      importantEvents: [],
+    };
+  }
+
+  const firstTimestamp = events[0]?.timestamp ?? null;
+  const lastTimestamp = events[events.length - 1]?.timestamp ?? null;
+  let fullSnapshotCount = 0;
+  let incrementalEventCount = 0;
+  const importantEvents: RecordingSummary['importantEvents'] = [];
+
+  for (const event of events) {
+    if (event.type === EVENT_TYPE_FULL_SNAPSHOT) fullSnapshotCount++;
+    if (event.type !== EVENT_TYPE_INCREMENTAL_SNAPSHOT) continue;
+
+    incrementalEventCount++;
+    const data = (event as { data?: { source?: number; type?: number; x?: number; y?: number } }).data;
+    if (!data || importantEvents.length >= 30) continue;
+
+    if (data.source === INCREMENTAL_SOURCE_MOUSE_INTERACTION && data.type === MOUSE_INTERACTION_CLICK) {
+      importantEvents.push({ ts: event.timestamp, type: 'click', summary: `Click at ${data.x ?? '?'}:${data.y ?? '?'}` });
+    } else if (data.source === INCREMENTAL_SOURCE_INPUT) {
+      importantEvents.push({ ts: event.timestamp, type: 'input', summary: 'Input changed' });
+    } else if (data.source === INCREMENTAL_SOURCE_SCROLL) {
+      importantEvents.push({ ts: event.timestamp, type: 'scroll', summary: `Scroll to ${data.x ?? 0}:${data.y ?? 0}` });
+    } else if (data.source === INCREMENTAL_SOURCE_MUTATION) {
+      importantEvents.push({ ts: event.timestamp, type: 'mutation', summary: 'DOM mutation captured' });
+    }
+  }
+
+  return {
+    hasRecording: true,
+    recordingDurationMs: firstTimestamp !== null && lastTimestamp !== null ? Math.max(0, lastTimestamp - firstTimestamp) : 0,
+    eventCount: events.length,
+    firstTimestamp,
+    lastTimestamp,
+    fullSnapshotCount,
+    incrementalEventCount,
+    recordingPath: null,
+    importantEvents,
+  };
 }

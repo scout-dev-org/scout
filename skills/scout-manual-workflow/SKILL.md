@@ -129,11 +129,12 @@ When the user asks to work from Scout:
 4. In single-next scope, inspect enough `changes_requested`, `review`, `in_progress`, `new`, and triage-worthy `note` items to choose the best next actionable item, then stop after that item or shared-root cluster reaches the furthest honest status.
 5. In full active queue scope, inspect `changes_requested`, `review`, `in_progress`, `new`, and triage-worthy `note` items before choosing work. Do not stop after one item unless the remaining queue is honestly blocked, waiting on target verification, not actionable, or unsafe.
 6. For every item that may move, fetch the full item before editing code or changing status.
-7. Read the item type (`bug`, `note`, `task`), source, message, status, priority, labels, created date, URL, route, component hints, selector, element text/HTML, screenshot path, session recording path, existing notes, assignee, branch, PR link, evidence, and related items.
-8. If the item is a `note`, run `AI Note Triage Algorithm` before any code work. Do not claim a note directly.
-9. Decide whether the resulting item is actionable now and what the furthest honest next status can be.
-10. If actionable, leave a concise Scout note that you are taking it and what local repo/branch you will use.
-11. Claim the item or move it to `in_progress` only when you are actually starting active implementation or verification for that item or shared-root cluster.
+7. Read the item type (`bug`, `note`, `task`), source, message, status, priority, labels, created date, URL, route, component hints, selector, element text/HTML, `debugContext`, `recordingSummary`, screenshot path, session recording path, existing notes, assignee, branch, PR link, evidence, and related items.
+8. For widget/frontend/admin items, inspect evidence in this order before downloading large artifacts: item fields, `debugContext` (page, navigation, actions, console, network, performance), screenshot, `debugContext.recordingSummary`, then rrweb player or full rrweb JSON only when needed.
+9. If the item is a `note`, run `AI Note Triage Algorithm` before any code work. Do not claim a note directly.
+10. Decide whether the resulting item is actionable now and what the furthest honest next status can be.
+11. If actionable, leave a concise Scout note that you are taking it and what local repo/branch you will use.
+12. Claim the item or move it to `in_progress` only when you are actually starting active implementation or verification for that item or shared-root cluster.
 
 ## Scout Item Types
 
@@ -151,7 +152,7 @@ Notes exist to keep widget capture lightweight while moving triage effort from h
 
 When handling a `note`:
 
-1. Read the full note context and nearby evidence: page URL, metadata, reporter, labels, existing comments, related items, and current project conventions.
+1. Read the full note context and nearby evidence: page URL, `debugContext`, `recordingSummary`, metadata, reporter, labels, existing comments, related items, and current project conventions.
 2. Search for related open bugs/tasks/notes before deciding. Link obvious duplicates or shared-root items yourself.
 3. Decide whether the note is actionable by using the note, evidence, related items, current product behavior, and the safest reversible professional default before treating it as a human product decision.
 4. A note is actionable when it names a desired outcome or user problem, the affected surface is discoverable, acceptance can be inferred safely, and the likely change is within the current repo/project.
@@ -271,13 +272,26 @@ Before implementing:
 
 For bugs, reproduce or collect the nearest practical evidence before fixing:
 
-1. Use the reported URL, screenshot, selector, recording, logs, API payload, or test failure.
+1. Use the reported URL, `debugContext`, screenshot, selector, recording, logs, API payload, or test failure.
 2. For frontend/user-visible bugs, run or use the local app and verify in a browser when feasible.
 3. Trace the code path to root cause. Do not patch symptoms blindly.
 4. Compare with nearby working behavior or established patterns.
 5. Add temporary probes only if they help find the cause; remove them before completion.
 
 If reproduction is impossible but the evidence is strong, say so in Scout and make the smallest evidence-backed fix.
+
+## Browser Debug Context And Session Replay
+
+Scout widget items may include structured browser diagnostics in `debugContext`. Treat this as primary reproduction evidence for frontend, widget, dashboard, and admin bugs.
+
+1. Read `debugContext.page` first to understand the exact captured URL, title, route, referrer, visibility state, viewport, screen, and timing context at report time.
+2. Use `debugContext.navigation`, `debugContext.actions`, `debugContext.console`, and `debugContext.network` to reconstruct what the user did, where they navigated, which requests were sent, which responses/errors came back, and which console errors/warnings were visible before the report.
+3. Prefer console/network/navigation/actions from `debugContext` over guessing reproduction steps from the message when the item came from the widget.
+4. Read `debugContext.recordingSummary` before opening the full session recording. The summary should tell whether rrweb replay exists, duration, event count, first/last timestamps, full/incremental event counts, storage path availability, and important clicks/inputs/scrolls/mutations.
+5. Treat rrweb session recording as reproducible DOM/event replay evidence, not as a passive attachment. It is especially important for multi-step bugs, timing or race-condition issues, redirects, navigation bugs, UI state bugs, and cases where the screenshot only shows the final state.
+6. Open the dashboard item detail and use the rrweb player when `debugContext`, screenshot, and `recordingSummary` do not explain the bug, or when the bug depends on user path, timing, navigation, redirects, transient UI state, or visual ordering.
+7. Download and inspect the full rrweb JSON from `sessionRecordingPath` only for targeted analysis: search specific strings, timestamps, event types, DOM mutations, or user actions. Do not paste the whole recording into chat or Scout notes.
+8. If `debugContext` is absent or malformed, continue with the older evidence flow: item fields, screenshot, selector/HTML, metadata, notes, dashboard player, and targeted recording download when needed.
 
 ## Runtime Error Group Items
 
