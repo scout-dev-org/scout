@@ -19,7 +19,11 @@ done
 
 for command_file in "$source_dir"/*.md; do
   [ -e "$command_file" ] || continue
-  cp "$command_file" "$target_dir/$(basename "$command_file")"
+  target_file="$target_dir/$(basename "$command_file")"
+  if [ -e "$target_file" ] && cmp -s "$command_file" "$target_file"; then
+    continue
+  fi
+  cp "$command_file" "$target_file"
 done
 
 printf 'Installed Scout OpenCode commands to %s\n' "$target_dir"
