@@ -645,7 +645,7 @@ All API calls are `POST` JSON unless retrieving storage assets. Authenticate wit
 
 Rules:
 
-- Before the first Scout API mutation or status read in a session, fetch live OpenAPI from `$SCOUT_URL/api/docs/openapi.json` unless the exact endpoint and payload were already verified in the current session. Do not infer REST-style paths from names.
+- Before the first Scout API mutation or status read in a session, fetch live OpenAPI from `$SCOUT_URL/api/docs/openapi.json` unless the exact endpoint and payload were already verified in the current session. OpenAPI path keys are relative to `servers[].url`, so inspect keys such as `/projects/list` and `/items/list`, not `/api/projects/list`; build runtime URLs with `$SCOUT_URL` plus `/api` or `/api/v1` plus the path. Do not infer REST-style paths from names.
 - Treat response shape as wrapped: read payloads from `.data` first. Lists normally return `.data.items` plus `.data.pagination`; item reads return the item directly in `.data`.
 - If a Scout API call returns `text/html`, a dashboard page, or `API_ENDPOINT_NOT_FOUND`, stop probing similar URLs. Re-read live OpenAPI and correct the endpoint/method/body before retrying.
 - Current collection responses use `data.items` with `data.pagination`; normalize as `(.data.items // .items // [])` only after inspecting the first response, not as a substitute for reading the live shape.
