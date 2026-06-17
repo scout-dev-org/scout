@@ -1,5 +1,13 @@
 import { z } from 'zod';
 import { ITEM_STATUSES, WEBHOOK_EVENT_TYPES } from '../db/schema.js';
+import {
+  ITEM_EVIDENCE_COVERAGES,
+  ITEM_EVIDENCE_KINDS,
+  ITEM_EVIDENCE_LEVELS,
+  ITEM_EVIDENCE_RESULTS,
+  ITEM_EVIDENCE_SOURCES,
+  UPDATE_ITEM_STATUS_TARGETS,
+} from './item-contract.js';
 import { normalizeOrigin } from './origins.js';
 
 // === Shared ===
@@ -13,16 +21,6 @@ const projectSlugSchema = z.string()
   .regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens')
   .min(2)
   .max(50);
-
-function withIdAlias<T extends z.ZodRawShape>(targetKey: 'id' | 'itemId', schema: z.ZodObject<T>) {
-  return z.preprocess((input) => {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
-    const record = input as Record<string, unknown>;
-    const sourceKey = targetKey === 'id' ? 'itemId' : 'id';
-    if (record[targetKey] !== undefined || record[sourceKey] === undefined) return input;
-    return { ...record, [targetKey]: record[sourceKey] };
-  }, schema);
-}
 
 const allowedOriginSchema = z.string().url().max(500).transform((value, ctx) => {
   try {
@@ -39,21 +37,11 @@ const base64Schema = (maxLength: number) => z.string()
     message: 'Must be valid base64',
   });
 
-const itemEvidenceSchema = z.object({
-  kind: z.enum(['handoff', 'verification', 'audit', 'blocker']).default('handoff'),
-  result: z.enum(['pass', 'fail', 'blocked', 'partial']).optional(),
-  level: z.enum([
-    'static',
-    'typecheck',
-    'api_smoke',
-    'browser_smoke',
-    'browser_acceptance',
-    'local_acceptance',
-    'staging_acceptance',
-    'production_acceptance',
-    'user_acceptance',
-  ]).optional(),
-  coverage: z.enum(['item', 'shared_root_cluster', 'route_sweep', 'audit_sample']).optional(),
+export const itemEvidenceSchema = z.object({
+  kind: z.enum(ITEM_EVIDENCE_KINDS).default('handoff'),
+  result: z.enum(ITEM_EVIDENCE_RESULTS).optional(),
+  level: z.enum(ITEM_EVIDENCE_LEVELS).optional(),
+  coverage: z.enum(ITEM_EVIDENCE_COVERAGES).optional(),
   environment: z.string().min(1).max(100),
   role: z.string().max(100).optional(),
   url: z.string().max(1000).optional(),
@@ -71,9 +59,11 @@ const itemEvidenceSchema = z.object({
   deploySha: z.string().max(100).optional(),
   risks: z.string().max(2000).optional(),
   uncheckedRisks: z.string().max(2000).optional(),
-  source: z.enum(['agent', 'human', 'ci', 'deploy', 'audit']).optional(),
+  source: z.enum(ITEM_EVIDENCE_SOURCES).optional(),
   verifiedAt: z.string().datetime().optional(),
 });
+
+export type ItemEvidenceInput = z.infer<typeof itemEvidenceSchema>;
 
 // === Auth ===
 export const loginSchema = z.object({
@@ -138,7 +128,7 @@ export const listUsersSchema = paginationSchema.extend({
 // === Items ===
 const itemTypeSchema = z.enum(['bug', 'note', 'task']);
 const itemStatusSchema = z.enum(ITEM_STATUSES);
-const updateItemStatusTargetSchema = z.enum(['in_progress', 'review']);
+const updateItemStatusTargetSchema = z.enum(UPDATE_ITEM_STATUS_TARGETS);
 
 export const createItemSchema = z.object({
   projectId: uuidSchema,
@@ -165,60 +155,50 @@ export const createItemSchema = z.object({
 export const listItemsSchema = z.object({
   page: z.number().int().min(1).default(1),
   perPage: z.number().int().min(1).max(100).optional(),
-  limit: z.number().int().min(1).max(100).optional(),
-  projectId: uuidSchema.optional(),
-  projectSlug: projectSlugSchema.optional(),
+  projectId: uuidSchema,
   itemType: itemTypeSchema.optional(),
   status: itemStatusSchema.optional(),
   statuses: z.array(itemStatusSchema).min(1).max(ITEM_STATUSES.length).optional(),
   priority: z.enum(['critical', 'high', 'medium', 'low']).optional(),
   assigneeId: uuidSchema.optional(),
   search: z.string().max(200).optional(),
-}).refine((value) => value.projectId || value.projectSlug, {
-  message: 'projectId or projectSlug is required',
-  path: ['projectId'],
 });
 
-export const getItemSchema = withIdAlias('id', z.object({ id: uuidSchema }));
+export const getItemSchema = z.object({ id: uuidSchema });
 
 export const countItemsSchema = z.object({
-  projectId: uuidSchema.optional(),
-  projectSlug: projectSlugSchema.optional(),
+  projectId: uuidSchema,
   itemType: itemTypeSchema.optional(),
-  status: itemStatusSchema.optional(),
-}).refine((value) => value.projectId || value.projectSlug, {
-  message: 'projectId or projectSlug is required',
-  path: ['projectId'],
 });
 
-export const claimItemSchema = withIdAlias('id', z.object({ id: uuidSchema }));
+export const claimItemSchema = z.object({ id: uuidSchema });
 
-export const resolveItemSchema = withIdAlias('id', z.object({
+export const resolveItemSchema = z.object({
   id: uuidSchema,
   resolutionNote: z.string().max(5000).optional(),
   branchName: z.string().max(255).optional(),
   mrUrl: z.string().url().max(500).optional(),
   evidence: itemEvidenceSchema.optional(),
-}));
+});
 
-export const cancelItemSchema = withIdAlias('id', z.object({ id: uuidSchema }));
+export const cancelItemSchema = z.object({ id: uuidSchema });
 
-export const updateItemStatusSchema = withIdAlias('id', z.object({
+export const updateItemStatusSchema = z.object({
   id: uuidSchema,
   status: updateItemStatusTargetSchema,
   branchName: z.string().max(255).optional(),
   mrUrl: z.string().url().max(500).optional(),
   attemptCount: z.number().int().min(0).optional(),
   evidence: itemEvidenceSchema.optional(),
-}));
+});
 
-export const verifyItemSchema = withIdAlias('id', z.object({
+export const verifyItemSchema = z.object({
   id: uuidSchema,
   comment: z.string().max(5000).optional(),
   evidence: itemEvidenceSchema.optional(),
-}));
+});
 
-export const requestChangesItemSchema = withIdAlias('id', z.object({
+export const requestChangesItemSchema = z.object({
   id: uuidSchema,
   summary: z.string().min(3).max(2000),
   expected: z.string().min(1).max(2000),
@@ -226,34 +206,34 @@ export const requestChangesItemSchema = withIdAlias('id', z.object({
   steps: z.string().max(5000).optional(),
   url: z.string().max(1000).optional(),
   evidence: itemEvidenceSchema.optional(),
-}));
+});
 
-export const deleteItemSchema = withIdAlias('id', z.object({ id: uuidSchema }));
+export const deleteItemSchema = z.object({ id: uuidSchema });
 
-export const updateItemSchema = withIdAlias('id', z.object({
+export const updateItemSchema = z.object({
   id: uuidSchema,
   itemType: itemTypeSchema.optional(),
   message: z.string().min(3).optional(),
   assigneeId: uuidSchema.nullish(),
   priority: z.enum(['critical', 'high', 'medium', 'low']).optional(),
   labels: z.array(z.string().max(50)).max(10).optional(),
-}));
+});
 
-export const reopenItemSchema = withIdAlias('id', z.object({
+export const reopenItemSchema = z.object({
   id: uuidSchema,
   status: z.enum(['new', 'in_progress']).optional(),
   reason: z.enum(['audit_failed', 'audit_blocked', 'staging_failed', 'regression', 'manual']).optional(),
   auditResult: z.enum(['fail', 'blocked']).optional(),
-}));
+});
 
-export const addNoteSchema = withIdAlias('itemId', z.object({
-  itemId: uuidSchema,
+export const addNoteSchema = z.object({
+  id: uuidSchema,
   content: z.string().min(1).max(5000),
-}));
+});
 
-export const addEvidenceSchema = withIdAlias('itemId', itemEvidenceSchema.extend({
-  itemId: uuidSchema,
-}));
+export const addEvidenceSchema = itemEvidenceSchema.extend({
+  id: uuidSchema,
+});
 
 export const itemLinkTypeSchema = z.enum(['related', 'duplicate', 'blocks', 'blocked_by', 'caused_by', 'conflicts']);
 
@@ -338,8 +318,7 @@ const errorSeveritySchema = z.enum(['info', 'warning', 'critical']);
 const errorStateSchema = z.enum(['active', 'ignored', 'resolved']);
 
 export const errorUpsertSchema = z.object({
-  projectId: uuidSchema.optional(),
-  projectSlug: z.string().min(1).max(80).optional(),
+  projectId: uuidSchema,
   source: z.string().min(1).max(80).default('alertmanager'),
   fingerprint: z.string().min(1).max(200),
   environment: z.string().min(1).max(80),
@@ -361,9 +340,6 @@ export const errorUpsertSchema = z.object({
   message: z.string().max(4000).optional(),
   release: z.string().max(120).optional(),
   cooldownKey: z.string().max(120).optional(),
-}).refine((value) => value.projectId || value.projectSlug, {
-  message: 'projectId or projectSlug is required',
-  path: ['projectId'],
 });
 
 export const listErrorGroupsSchema = paginationSchema.extend({

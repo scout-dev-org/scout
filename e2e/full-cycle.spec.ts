@@ -223,7 +223,7 @@ test.describe('Full bug lifecycle', () => {
 
     // Add note
     const { status: noteStatus } = await apiPost('/items/add-note', {
-      itemId, content: 'E2E test comment',
+      id: itemId, content: 'E2E test comment',
     }, adminToken);
     expect(noteStatus).toBe(201);
 

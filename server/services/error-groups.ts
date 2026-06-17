@@ -2,7 +2,7 @@ import { and, count, desc, eq, inArray, lte } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
 import { errorGroupOccurrences, errorGroups, projects, scoutBridgeJobs, scoutItems, scoutItemNotes, type ErrorGroup } from '../db/schema.js';
-import { NotFoundError, ValidationError } from '../lib/errors.js';
+import { NotFoundError } from '../lib/errors.js';
 import { eventBus } from '../lib/event-bus.js';
 import { logAudit } from './audit.js';
 import { dispatchWebhooks } from './webhooks.js';
@@ -14,8 +14,7 @@ type ItemStatusChange = {
 };
 
 type ErrorUpsertInput = {
-  projectId?: string;
-  projectSlug?: string;
+  projectId: string;
   source: string;
   fingerprint: string;
   environment: string;
@@ -321,14 +320,14 @@ async function enrichFromTempo(input: ErrorUpsertInput): Promise<ErrorUpsertInpu
 }
 
 export function resolveErrorProjectId(input: ErrorUpsertInput): string {
-  if (input.projectId) {
-    const project = db.select({ id: projects.id }).from(projects).where(eq(projects.id, input.projectId)).get();
-    if (!project) throw new NotFoundError('Project', 'PROJECT_NOT_FOUND');
-    return project.id;
-  }
+  const project = db.select({ id: projects.id }).from(projects).where(eq(projects.id, input.projectId)).get();
+  if (!project) throw new NotFoundError('Project', 'PROJECT_NOT_FOUND');
+  return project.id;
+}
 
-  if (!input.projectSlug) throw new ValidationError('projectId or projectSlug is required', 'PROJECT_REQUIRED');
-  const project = db.select({ id: projects.id }).from(projects).where(eq(projects.slug, input.projectSlug)).get();
+function resolveBridgeProjectId(labels: Record<string, unknown>): string {
+  const slug = firstString(labels.project, labels.project_slug) ?? 'avtozor';
+  const project = db.select({ id: projects.id }).from(projects).where(eq(projects.slug, slug)).get();
   if (!project) throw new NotFoundError('Project', 'PROJECT_NOT_FOUND');
   return project.id;
 }
@@ -595,7 +594,7 @@ export function normalizeAlertmanagerPayload(payload: any): ErrorUpsertInput[] {
       const fingerprint = alert.fingerprint || createHash('sha256').update(`${env}|${service}|${alertname}|${labels.route_template || ''}|${labels.error_type || ''}`).digest('hex');
       const explicitLogsUrl = firstUrl(annotations.grafana_logs_url, annotations.logs_url, labels.grafana_logs_url, labels.logs_url);
       return {
-        projectSlug: labels.project || labels.project_slug || 'avtozor',
+        projectId: resolveBridgeProjectId(labels),
         source: 'alertmanager',
         fingerprint,
         environment: env,

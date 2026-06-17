@@ -170,44 +170,23 @@ npx skills update scout-manual-workflow -g -y
 
 Create an agent API key from the dashboard: `Projects` → target project → `Manage integrations` → `Create agent key`. The full `sk_live_*` key is shown once together with a ready-to-copy `SCOUT_*` env block. Store it in a password manager, shell environment, or local ignored `.env`, not in the repository.
 
+After installation, `/scout` does not require a local Scout repository clone. It needs the installed `scout-manual-workflow` skill, the installed command, and Scout API credentials (`SCOUT_URL`, `SCOUT_PROJECT_ID`, `SCOUT_API_KEY`). At the start of the run the skill reads `$SCOUT_URL/api/docs/openapi.json` and follows that contract exactly.
+
 Scout developers who want live command or skill edits outside this checkout should use the linked setup in `skills/README.md` instead of reinstalling after each change. Restart OpenCode after changing commands, skills, or OpenCode config.
 
 ## API
 
-All endpoints are `POST` with JSON body. Auth via `Authorization: Bearer <jwt|api-key>`.
+The live API contract at `/api/docs/openapi.json` is the single source of truth for clients, installed agent skills, and operator workflows. Use it for every endpoint method, URL, request body, and response shape. Do not infer REST-style item URLs or payload fields from endpoint names.
 
-Base path: `/api/v1/` (or `/api/` for backward compatibility).
+Auth via `Authorization: Bearer <jwt|api-key>`.
 
-OpenAPI is served at `/api/docs/openapi.json`, but its `paths` keys are relative to the declared server base URLs. For example, the spec lists `/items/list`; the runtime URL is `/api/items/list` or `/api/v1/items/list`.
+Base path: `/api/`.
 
-Agent/CLI convenience: `/api/items/list` and `/api/items/count` accept `projectSlug` instead of `projectId`; `/api/items/list` accepts `limit` as a `perPage` alias; item endpoints accept `itemId` as an alias for `id` where the body otherwise uses `id`.
+OpenAPI is served at `/api/docs/openapi.json`, but its `paths` keys are relative to `servers[0].url`. For example, the spec lists `/items/list`; the runtime URL is `/api/items/list`.
 
-Responses are wrapped in `data`. For example, read an item with `POST /api/items/get` and body `{ "id": "<item-id>" }`, then read the item from `.data`. Scout does not use REST-style item URLs such as `/api/items/<id>`; unknown `/api/*` paths return JSON `API_ENDPOINT_NOT_FOUND` with a link to `/api/docs/openapi.json` instead of dashboard HTML.
+Successful JSON responses are wrapped in `data`; error responses use `error` and usually `code`. Scout does not use REST-style item URLs such as `/api/items/<id>`; unknown `/api/*` paths return JSON `API_ENDPOINT_NOT_FOUND` with a link to `/api/docs/openapi.json` instead of dashboard HTML.
 
 Interactive docs: `https://your-scout.example/api/docs`
-
-**Key endpoints:**
-
-| Endpoint | Description |
-|----------|-------------|
-| `/api/auth/login` | Get JWT token |
-| `/api/items/create` | Create bug report |
-| `/api/items/list` | List items (filtered) |
-| `/api/items/get` | Get item with notes, related items, and current-user permissions |
-| `/api/items/claim` | Assign to self |
-| `/api/items/update-status` | Move an item only to `in_progress` or `review`; `review` requires structured evidence and a real commit SHA or MR URL |
-| `/api/items/add-evidence` | Add structured handoff, verification, audit, or blocker evidence |
-| `/api/items/resolve` | Mark implementation as `done`, ready for human acceptance |
-| `/api/items/verify` | Human acceptance: move `done` to `verified` |
-| `/api/items/request-changes` | Human rejection: move `review`/`done`/`verified` to `changes_requested` with expected/actual context |
-| `/api/items/reopen` | Reopen `done`/`verified`/`cancelled` items to `new` or `in_progress`; optional `reason`/`auditResult` records why |
-| `/api/items/link` | Link related/duplicate/blocking items |
-| `/api/v1/integrations/errors/upsert` | Create/update runtime error groups and link them to Scout items |
-| `/api/v1/integrations/errors/list` | List runtime error groups for a project |
-| `/api/v1/integrations/errors/get` | Get a runtime error group with linked item context |
-| `/api/v1/integrations/errors/bridge/alertmanager` | Alertmanager-compatible bridge webhook guarded by a shared secret |
-| `/api/v1/integrations/errors/bridge/health` | Bridge queue health and dead-letter counts |
-| `/api/auth/validate` | Validate token/API key |
 
 ## Deployment
 

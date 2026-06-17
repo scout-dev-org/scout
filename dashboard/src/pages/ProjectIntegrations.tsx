@@ -66,7 +66,7 @@ export default function ProjectIntegrations() {
     : '';
 
   const envBlock = project && createdKey
-    ? `export SCOUT_URL="${window.location.origin}"\nexport SCOUT_PROJECT_SLUG="${project.slug}"\nexport SCOUT_API_KEY="${createdKey}"`
+    ? `export SCOUT_URL="${window.location.origin}"\nexport SCOUT_PROJECT_ID="${project.id}"\nexport SCOUT_API_KEY="${createdKey}"`
     : '';
 
   async function copyText(text: string, idToMark: string) {

@@ -174,23 +174,23 @@ describe('Error integrations routes', () => {
     expect(body.data.errorGroup.state).toBe('active');
   });
 
-  it('rejects projectSlug cross-project writes for project-scoped API keys', async () => {
+  it('rejects cross-project writes for project-scoped API keys', async () => {
     const key = await createApiKey(['errors:write']);
-    ctx.db.insert(projects).values({ id: randomUUID(), name: 'Other Project', slug: 'other-project', allowedOrigins: '[]' }).run();
-    const { projectId: _projectId, ...payload } = basePayload;
+    const otherProjectId = randomUUID();
+    ctx.db.insert(projects).values({ id: otherProjectId, name: 'Other Project', slug: 'other-project', allowedOrigins: '[]' }).run();
 
-    const res = await upsert({ ...payload, projectSlug: 'other-project', fingerprint: 'gateway:local:other-project' }, key);
+    const res = await upsert({ ...basePayload, projectId: otherProjectId, fingerprint: 'gateway:local:other-project' }, key);
 
     expect(res.status).toBe(403);
   });
 
-  it('allows projectSlug writes for the API key project', async () => {
+  it('rejects projectSlug in public upsert payload', async () => {
     const key = await createApiKey(['errors:write']);
     const { projectId: _projectId, ...payload } = basePayload;
 
     const res = await upsert({ ...payload, projectSlug: 'test-project', fingerprint: 'gateway:local:test-project-slug' }, key);
 
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(400);
   });
 
   it('does not reopen linked done item within regression cooldown', async () => {

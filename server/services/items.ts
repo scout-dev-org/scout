@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { DONE_EVIDENCE_LEVELS, VALID_ITEM_STATUS_TRANSITIONS } from '../lib/item-contract.js';
+import type { ItemEvidenceInput } from '../lib/schemas.js';
 import { NotFoundError, ConflictError, ValidationError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 
@@ -16,48 +18,7 @@ interface DbOrTx {
   delete: typeof db.delete;
 }
 
-const VALID_TRANSITIONS: Record<ItemStatus, ItemStatus[]> = {
-  new: ['in_progress', 'cancelled'],
-  in_progress: ['review', 'done', 'cancelled'],
-  review: ['in_progress', 'done', 'changes_requested', 'cancelled'],
-  done: ['new', 'changes_requested', 'verified'],
-  changes_requested: ['in_progress', 'cancelled'],
-  verified: ['new', 'changes_requested'],
-  cancelled: ['new'],
-};
-
-type ItemEvidenceInput = {
-  kind?: 'handoff' | 'verification' | 'audit' | 'blocker';
-  result?: 'pass' | 'fail' | 'blocked' | 'partial';
-  level?: 'static' | 'typecheck' | 'api_smoke' | 'browser_smoke' | 'browser_acceptance' | 'local_acceptance' | 'staging_acceptance' | 'production_acceptance' | 'user_acceptance';
-  coverage?: 'item' | 'shared_root_cluster' | 'route_sweep' | 'audit_sample';
-  environment: string;
-  role?: string;
-  url?: string;
-  scenario: string;
-  action: string;
-  visibleResult: string;
-  acceptanceScope?: string;
-  consoleResult?: string;
-  networkResult?: string;
-  apiResult?: string;
-  dbResult?: string;
-  fixture?: string;
-  cleanupResult?: string;
-  commitSha?: string;
-  deploySha?: string;
-  risks?: string;
-  uncheckedRisks?: string;
-  source?: 'agent' | 'human' | 'ci' | 'deploy' | 'audit';
-  verifiedAt?: string;
-};
-
-const DONE_EVIDENCE_LEVELS = new Set<ItemEvidenceInput['level']>([
-  'local_acceptance',
-  'staging_acceptance',
-  'production_acceptance',
-  'user_acceptance',
-]);
+const DONE_EVIDENCE_LEVEL_SET = new Set<ItemEvidenceInput['level']>(DONE_EVIDENCE_LEVELS);
 
 const ITEM_DEDUPE_WINDOW_MS = 10 * 60 * 1000;
 const ITEM_DEDUPE_CANDIDATE_LIMIT = 50;
@@ -123,46 +84,28 @@ function addEvidence(
   return id;
 }
 
-function hasFreshEvidence(itemId: string, itemUpdatedAt: string, newStatus: ItemStatus, mrUrl?: string): boolean {
-  const updatedAt = Date.parse(itemUpdatedAt);
-  if (Number.isNaN(updatedAt)) return false;
-
-  const evidence = db.select()
-    .from(scoutItemEvidence)
-    .where(eq(scoutItemEvidence.itemId, itemId))
-    .all();
-
-  return evidence.some((entry) => {
-    const createdAt = Date.parse(entry.createdAt);
-    return !Number.isNaN(createdAt) && createdAt >= updatedAt && isEvidenceStrongEnough(newStatus, entry, mrUrl);
-  });
-}
-
 function isEvidenceStrongEnough(
   newStatus: ItemStatus,
   evidence: { result?: ItemEvidenceInput['result'] | null; level?: ItemEvidenceInput['level'] | null; commitSha?: string | null },
-  mrUrl?: string,
 ): boolean {
   if (newStatus !== 'review' && newStatus !== 'done') return true;
   if (evidence.result !== 'pass') return false;
   if (!evidence.level) return false;
-  if (newStatus === 'review') return Boolean(evidence.commitSha || mrUrl);
-  return DONE_EVIDENCE_LEVELS.has(evidence.level);
+  if (newStatus === 'review') return Boolean(evidence.commitSha);
+  return DONE_EVIDENCE_LEVEL_SET.has(evidence.level);
 }
 
 function requireHandoffEvidence(
   item: typeof scoutItems.$inferSelect,
   newStatus: ItemStatus,
   evidence?: ItemEvidenceInput,
-  extra?: { mrUrl?: string },
 ): void {
   if (newStatus !== 'review' && newStatus !== 'done') return;
-  if (evidence && isEvidenceStrongEnough(newStatus, evidence, extra?.mrUrl)) return;
-  if (hasFreshEvidence(item.id, item.updatedAt, newStatus, extra?.mrUrl)) return;
+  if (evidence && isEvidenceStrongEnough(newStatus, evidence)) return;
   if (newStatus === 'review') {
-    throw new ValidationError('Review requires fresh passing structured evidence with a commit SHA or MR URL', 'REVIEW_EVIDENCE_REQUIRED');
+    throw new ValidationError('Review requires inline passing structured evidence with a commit SHA', 'REVIEW_EVIDENCE_REQUIRED');
   }
-  throw new ValidationError('Done requires fresh passing target-acceptance evidence', 'DONE_EVIDENCE_REQUIRED');
+  throw new ValidationError('Done requires inline passing target-acceptance evidence', 'DONE_EVIDENCE_REQUIRED');
 }
 
 const RRWEB_FULL_SNAPSHOT_TYPE = 2;
@@ -347,7 +290,7 @@ function findDuplicateItem(data: {
 }
 
 export function validateTransition(from: ItemStatus, to: ItemStatus): void {
-  if (!VALID_TRANSITIONS[from]?.includes(to)) {
+  if (!VALID_ITEM_STATUS_TRANSITIONS[from]?.includes(to)) {
     throw new ValidationError(`Invalid status transition: ${from} → ${to}`, 'INVALID_STATUS_TRANSITION');
   }
 }
@@ -511,7 +454,7 @@ export function updateItemStatus(
   }
 
   validateTransition(item.status as ItemStatus, newStatus);
-  requireHandoffEvidence(item, newStatus, extra?.evidence, extra);
+  requireHandoffEvidence(item, newStatus, extra?.evidence);
 
   return db.transaction((tx) => {
     const updateData: Record<string, unknown> = {

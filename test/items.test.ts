@@ -161,14 +161,14 @@ describe('Items routes', () => {
     expect(body.data.items.map((item: any) => item.id).sort()).toEqual([newItem.id, inProgressItem.id].sort());
   });
 
-  it('POST /list — accepts projectSlug and limit aliases for agent clients', async () => {
+  it('POST /list — uses projectId and perPage', async () => {
     await createTestItem();
     await createTestItem();
 
     const res = await post('/list', {
-      projectSlug: 'test-project',
+      projectId: ctx.projectId,
       statuses: ['new'],
-      limit: 1,
+      perPage: 1,
     }, ctx.adminToken);
 
     expect(res.status).toBe(200);
@@ -193,13 +193,11 @@ describe('Items routes', () => {
     expect(Array.isArray(body.data.evidence)).toBe(true);
   });
 
-  it('POST /get — accepts itemId alias for agent clients', async () => {
+  it('POST /get — rejects non-canonical itemId field', async () => {
     const item = await createTestItem();
 
     const res = await post('/get', { itemId: item.id }, ctx.adminToken);
-    expect(res.status).toBe(200);
-    const body = await res.json() as any;
-    expect(body.data.id).toBe(item.id);
+    expect(res.status).toBe(400);
   });
 
   it('POST /get — non-existent returns 404', async () => {
@@ -221,10 +219,10 @@ describe('Items routes', () => {
     expect(body.data.counts.verified).toBe(0);
   });
 
-  it('POST /count — accepts projectSlug alias for agent clients', async () => {
+  it('POST /count — uses projectId only', async () => {
     await createTestItem();
 
-    const res = await post('/count', { projectSlug: 'test-project' }, ctx.adminToken);
+    const res = await post('/count', { projectId: ctx.projectId }, ctx.adminToken);
     expect(res.status).toBe(200);
     const body = await res.json() as any;
     expect(body.data.counts.new).toBe(1);
@@ -368,7 +366,7 @@ describe('Items routes', () => {
     const item = await createTestItem();
 
     const res = await post('/add-note', {
-      itemId: item.id,
+      id: item.id,
       content: 'This is a manual comment',
     }, ctx.memberToken);
 
@@ -806,7 +804,7 @@ describe('Items routes', () => {
     expect(res.status).toBe(400);
   });
 
-  it('POST /update-status — review requires commit or MR evidence', async () => {
+  it('POST /update-status — review requires commitSha evidence', async () => {
     const item = await createTestItem();
     await post('/claim', { id: item.id }, ctx.developerToken);
 

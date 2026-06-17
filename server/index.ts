@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { createMiddleware } from 'hono/factory';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -144,16 +143,8 @@ app.use('/api/*', cors({
   credentials: true,
 }));
 
-// --- API version header ---
-const apiVersionHeader = createMiddleware(async (c, next) => {
-  await next();
-  c.header('X-API-Version', 'v1');
-});
-app.use('/api/*', apiVersionHeader);
-
 // --- SSE (registered before rate limiter — long-lived connections) ---
 app.route('/api/events', eventRoutes);
-app.route('/api/v1/events', eventRoutes);
 
 // --- API Docs (public, no auth/rate-limit) ---
 app.route('/api/docs', docsRoutes);
@@ -161,32 +152,25 @@ app.route('/api/docs', docsRoutes);
 // --- Rate limiting ---
 // Auth routes: 5 req/min per IP (brute-force protection)
 app.use('/api/auth/*', rateLimit(60_000, 5));
-app.use('/api/v1/auth/*', rateLimit(60_000, 5));
 // Item creation: 20 req/min per IP
 app.use('/api/items/create', rateLimit(60_000, 20));
-app.use('/api/v1/items/create', rateLimit(60_000, 20));
 // All API routes: 100 req/min per IP
 app.use('/api/*', rateLimit(60_000, 100));
 
-// V1 routes (current)
-const v1 = new Hono();
-v1.route('/auth', authRoutes);
-v1.route('/projects', projectRoutes);
-v1.route('/users', userRoutes);
-v1.route('/items', itemRoutes);
-v1.route('/webhooks', webhookRoutes);
-v1.route('/notifications', notificationRoutes);
-v1.route('/api-keys', apiKeyRoutes);
-v1.route('/integrations/errors', integrationsErrorsRoutes);
+const apiRoutes = new Hono();
+apiRoutes.route('/auth', authRoutes);
+apiRoutes.route('/projects', projectRoutes);
+apiRoutes.route('/users', userRoutes);
+apiRoutes.route('/items', itemRoutes);
+apiRoutes.route('/webhooks', webhookRoutes);
+apiRoutes.route('/notifications', notificationRoutes);
+apiRoutes.route('/api-keys', apiKeyRoutes);
+apiRoutes.route('/integrations/errors', integrationsErrorsRoutes);
 
-// Mount v1 under /api/v1/
-app.route('/api/v1', v1);
-
-// Backward compatibility: /api/* → same as /api/v1/*
-app.route('/api', v1);
+app.route('/api', apiRoutes);
 
 function getApiNotFoundHint(path: string): string {
-  if (/^\/api(?:\/v1)?\/items\/[0-9a-f-]{36}$/i.test(path)) {
+  if (/^\/api\/items\/[0-9a-f-]{36}$/i.test(path)) {
     return 'Use POST /api/items/get with JSON body { "id": "<item-id>" }. Scout item endpoints are POST JSON, not REST-style item URLs.';
   }
   return 'Inspect /api/docs/openapi.json and call the documented POST JSON endpoint.';

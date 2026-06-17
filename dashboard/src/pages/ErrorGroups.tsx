@@ -95,7 +95,7 @@ export default function ErrorGroups() {
     setLoading(true);
     setError('');
 
-    api<{ items: ErrorGroup[]; pagination: PaginationData }>('/api/v1/integrations/errors/list', {
+    api<{ items: ErrorGroup[]; pagination: PaginationData }>('/api/integrations/errors/list', {
       projectId: selectedProject,
       page: pagination.page,
       perPage: 20,
@@ -134,7 +134,7 @@ export default function ErrorGroups() {
     if (!reason) return;
     setActionId(group.id);
     try {
-      await api('/api/v1/integrations/errors/ignore', { id: group.id, ignoreReason: reason }, t);
+      await api('/api/integrations/errors/ignore', { id: group.id, ignoreReason: reason }, t);
       fetchGroups();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('errors.actions.failed'));
@@ -146,7 +146,7 @@ export default function ErrorGroups() {
   async function handleUnignore(group: ErrorGroup) {
     setActionId(group.id);
     try {
-      await api('/api/v1/integrations/errors/unignore', { id: group.id }, t);
+      await api('/api/integrations/errors/unignore', { id: group.id }, t);
       fetchGroups();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('errors.actions.failed'));

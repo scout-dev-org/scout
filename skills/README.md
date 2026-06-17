@@ -1,6 +1,6 @@
 # Scout Skills
 
-This directory contains the canonical agent skills for working with Scout.
+This directory contains the canonical agent skills for working with Scout. Skills describe operator behavior. The only API contract is live OpenAPI at `$SCOUT_URL/api/docs/openapi.json`.
 
 ## `scout-manual-workflow`
 
@@ -10,7 +10,7 @@ Use this skill when an AI coding agent should take Scout work and handle it manu
 
 Scout ships one OpenCode slash command in `.opencode/commands/`: `/scout`. It is a thin entrypoint into `scout-manual-workflow`; keep lifecycle rules in the skill and let the agent infer full active queue, single-item, single-next, needs-review follow-up, changes-requested follow-up, runtime-error follow-up, or done/verified audit scope from arguments and live queue state. Every invocation uses maintainer-level ownership; arguments choose scope, not a weaker behavior profile. With no arguments, `/scout` defaults to full active queue scope and solves every item that can honestly move further.
 
-The workflow is schema-aware: status transitions to `review` or `done` should use structured evidence with `result`, `level`, `coverage`, `scenario`, `action`, `visibleResult`, and item-specific `acceptanceScope`. `review` also requires a real commit SHA or MR URL. `done` means the AI/operator work is ready for human acceptance via `/api/items/verify`; rejected work returns through `/api/items/request-changes` as `changes_requested`.
+The workflow is schema-aware: `review` and `done` transitions require structured evidence with `environment`, `result`, `level`, `coverage`, `scenario`, `action`, `visibleResult`, and item-specific `acceptanceScope`. For `review`, put the real commit SHA in evidence; use `mrUrl` only for a real PR/MR URL. `done` means AI/operator work is ready for human acceptance via `/api/items/verify`.
 
 Widget-created items may include `debugContext`, which stores the captured page, navigation, user actions, console warnings/errors, failed/slow network summaries, performance timing, and a compact rrweb `recordingSummary`. The `/scout` workflow should inspect those structured fields before downloading a full rrweb recording; open the dashboard player or parse the recording JSON only when the bug depends on path, timing, navigation, redirects, or missing context.
 
@@ -19,6 +19,8 @@ Human queue tabs are status groups, not separate states: `Open` = `new`, `In Pro
 The command works without arguments and defaults to full active queue scope. Text after `/scout` is natural-language scope input: it may identify an item, project, branch, deploy target, single-next work, full-queue work, needs-review follow-up, changes-requested follow-up, runtime-error follow-up, or done/verified audit behavior. Arguments are not a structured subcommand API.
 
 ## Developer linked setup
+
+Installed `/scout` works without a local Scout repository clone when the command, skill, and Scout API credentials (`SCOUT_URL`, `SCOUT_PROJECT_ID`, `SCOUT_API_KEY`) are present. The workflow must use live OpenAPI as its only API contract.
 
 When running OpenCode from this repository, no skill installation is required. `.opencode/opencode.json` loads `skills/`, and `.opencode/commands/scout.md` provides `/scout` from the checkout.
 
@@ -88,7 +90,7 @@ For a shell session, use `export`:
 ```bash
 export SCOUT_URL="https://your-scout.example"
 export SCOUT_API_KEY="<CHANGE-ME-sk_live-api-key>"
-export SCOUT_PROJECT_SLUG="<CHANGE-ME-project-slug>"
+export SCOUT_PROJECT_ID="<CHANGE-ME-project-id>"
 ```
 
 For a dotenv file, omit `export`:
@@ -96,7 +98,7 @@ For a dotenv file, omit `export`:
 ```dotenv
 SCOUT_URL=https://your-scout.example
 SCOUT_API_KEY=<CHANGE-ME-sk_live-api-key>
-SCOUT_PROJECT_SLUG=<CHANGE-ME-project-slug>
+SCOUT_PROJECT_ID=<CHANGE-ME-project-id>
 ```
 
 If you load a dotenv file with plain shell `source`, export variables before launching the agent:

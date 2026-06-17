@@ -1,7 +1,31 @@
 import { Hono } from 'hono';
 import { ITEM_STATUSES } from '../db/schema.js';
+import {
+  ITEM_EVIDENCE_COVERAGES,
+  ITEM_EVIDENCE_KINDS,
+  ITEM_EVIDENCE_LEVELS,
+  ITEM_EVIDENCE_REQUIRED_FIELDS,
+  ITEM_EVIDENCE_RESULTS,
+  ITEM_EVIDENCE_SOURCES,
+  UPDATE_ITEM_STATUS_TARGETS,
+} from '../lib/item-contract.js';
 
 // ─── OpenAPI 3.0.3 Spec ──────────────────────────────────────────────────────
+
+type OpenApiSchema = Record<string, unknown>;
+
+const AUTH_SECURITY = [{ BearerAuth: [] }, { ApiKeyAuth: [] }];
+
+function itemRequestSchema(extraProperties: OpenApiSchema = {}, extraRequired: string[] = []): OpenApiSchema {
+  return {
+    type: 'object',
+    required: ['id', ...extraRequired],
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      ...extraProperties,
+    },
+  };
+}
 
 const spec = {
   openapi: '3.0.3',
@@ -9,12 +33,11 @@ const spec = {
     title: 'Scout Bug Tracking API',
     version: '1.0.0',
     description:
-      'Scout — self-hosted bug tracker for AI-assisted product teams. Agent workflows are expected to drive actionable work to the furthest honest status with structured evidence, asking only for hard gates such as missing access, production release, destructive action, external communication, live-money/provider action, secrets exposure, or human acceptance. Все API-эндпоинты используют метод POST с JSON-телом (кроме health, events, docs). Авторизация через Bearer JWT или API Key (`sk_live_...`). OpenAPI path keys are relative to `servers[].url`: for example `/items/list` becomes `/api/items/list` or `/api/v1/items/list` at runtime. Agent convenience aliases: `/items/list` and `/items/count` accept `projectSlug` instead of `projectId`, `/items/list` accepts `limit` as a `perPage` alias, and item endpoints accept `itemId` as an alias for `id` where the body otherwise uses `id`. Unknown `/api/*` paths return JSON `API_ENDPOINT_NOT_FOUND` with a docs link and endpoint hint instead of dashboard HTML.',
+      'Scout — self-hosted bug tracker for AI-assisted product teams. Agent workflows are expected to drive actionable work to the furthest honest status with structured evidence, asking only for hard gates such as missing access, production release, destructive action, external communication, live-money/provider action, secrets exposure, or human acceptance. Все API-эндпоинты используют метод POST с JSON-телом (кроме health, events, docs). Авторизация через Bearer JWT или API Key (`sk_live_...`). OpenAPI path keys are relative to `servers[0].url`: for example `/items/list` becomes `/api/items/list` at runtime. Use the exact method, path, and JSON body fields shown by this OpenAPI document; do not infer REST-style item URLs, query-string item reads, or payload fields from endpoint names. Unknown `/api/*` paths return JSON `API_ENDPOINT_NOT_FOUND` with a docs link and endpoint hint instead of dashboard HTML.',
     contact: { url: 'https://your-scout.example' },
   },
   servers: [
-    { url: '/api/v1', description: 'API v1 (current)' },
-    { url: '/api', description: 'API (backward-compatible alias)' },
+    { url: '/api', description: 'Canonical API base path' },
   ],
   tags: [
     { name: 'Auth', description: 'Аутентификация и валидация токенов' },
@@ -262,18 +285,14 @@ const spec = {
           createdAt: { type: 'string', format: 'date-time' },
         },
       },
-      ItemEvidence: {
+      ItemEvidenceInput: {
         type: 'object',
-        required: ['environment', 'scenario', 'action', 'visibleResult'],
+        required: [...ITEM_EVIDENCE_REQUIRED_FIELDS],
         properties: {
-          id: { type: 'string', format: 'uuid' },
-          itemId: { type: 'string', format: 'uuid' },
-          userId: { type: 'string', format: 'uuid', nullable: true },
-          userName: { type: 'string', nullable: true },
-          kind: { type: 'string', enum: ['handoff', 'verification', 'audit', 'blocker'], default: 'handoff' },
-          result: { type: 'string', enum: ['pass', 'fail', 'blocked', 'partial'], nullable: true },
-          level: { type: 'string', enum: ['static', 'typecheck', 'api_smoke', 'browser_smoke', 'browser_acceptance', 'local_acceptance', 'staging_acceptance', 'production_acceptance', 'user_acceptance'], nullable: true },
-          coverage: { type: 'string', enum: ['item', 'shared_root_cluster', 'route_sweep', 'audit_sample'], nullable: true },
+          kind: { type: 'string', enum: [...ITEM_EVIDENCE_KINDS], default: 'handoff' },
+          result: { type: 'string', enum: [...ITEM_EVIDENCE_RESULTS], nullable: true },
+          level: { type: 'string', enum: [...ITEM_EVIDENCE_LEVELS], nullable: true },
+          coverage: { type: 'string', enum: [...ITEM_EVIDENCE_COVERAGES], nullable: true },
           environment: { type: 'string', maxLength: 100 },
           role: { type: 'string', maxLength: 100, nullable: true },
           url: { type: 'string', maxLength: 1000, nullable: true },
@@ -291,10 +310,24 @@ const spec = {
           deploySha: { type: 'string', maxLength: 100, nullable: true },
           risks: { type: 'string', maxLength: 2000, nullable: true },
           uncheckedRisks: { type: 'string', maxLength: 2000, nullable: true },
-          source: { type: 'string', enum: ['agent', 'human', 'ci', 'deploy', 'audit'], nullable: true },
+          source: { type: 'string', enum: [...ITEM_EVIDENCE_SOURCES], nullable: true },
           verifiedAt: { type: 'string', format: 'date-time', nullable: true },
-          createdAt: { type: 'string', format: 'date-time' },
         },
+      },
+      ItemEvidence: {
+        allOf: [
+          { $ref: '#/components/schemas/ItemEvidenceInput' },
+          {
+            type: 'object',
+            properties: {
+              id: { type: 'string', format: 'uuid' },
+              itemId: { type: 'string', format: 'uuid' },
+              userId: { type: 'string', format: 'uuid', nullable: true },
+              userName: { type: 'string', nullable: true },
+              createdAt: { type: 'string', format: 'date-time' },
+            },
+          },
+        ],
       },
       ErrorGroup: {
         type: 'object',
@@ -368,6 +401,7 @@ const spec = {
         type: 'object',
         properties: {
           error: { type: 'string' },
+          code: { type: 'string', description: 'Stable machine-readable error code when available' },
         },
         required: ['error'],
       },
@@ -465,7 +499,7 @@ const spec = {
         tags: ['Auth'],
         summary: 'Текущий пользователь',
         description: 'Возвращает данные текущего авторизованного пользователя.',
-        security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+        security: AUTH_SECURITY,
         responses: {
           200: {
             description: 'Данные пользователя',
@@ -494,7 +528,7 @@ const spec = {
         tags: ['Auth'],
         summary: 'Обновить JWT',
         description: 'Возвращает новый JWT-токен и актуальные данные текущего авторизованного пользователя.',
-        security: [{ BearerAuth: [] }],
+        security: AUTH_SECURITY,
         responses: {
           200: {
             description: 'Токен обновлён',
@@ -563,7 +597,7 @@ const spec = {
         tags: ['Items'],
         summary: 'Создать item',
         description: 'Создаёт баг, заметку или задачу в проекте. Виджет по умолчанию создаёт bug; заметки нужно преобразовать в task перед workflow-работой. Требуется project permission `create_item` (admin/owner/manager/reporter). Rate limit: 20 req/min.',
-        security: [{ BearerAuth: [] }],
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
@@ -623,17 +657,16 @@ const spec = {
         tags: ['Items'],
         summary: 'Список items',
         description: 'Пагинированный список items проекта с фильтрацией. Требуется доступ к проекту.',
-        security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                anyOf: [{ required: ['projectId'] }, { required: ['projectSlug'] }],
+                required: ['projectId'],
                 properties: {
                   projectId: { type: 'string', format: 'uuid' },
-                  projectSlug: { type: 'string', pattern: '^[a-z0-9-]+$', description: 'Agent-friendly alias for selecting a project when the UUID is not known yet.' },
                   itemType: { $ref: '#/components/schemas/ItemType' },
                   status: { $ref: '#/components/schemas/ItemStatus' },
                   statuses: { type: 'array', items: { $ref: '#/components/schemas/ItemStatus' }, minItems: 1, maxItems: ITEM_STATUSES.length, description: 'Filter by multiple statuses, useful for human queue groups such as Needs Review = review + changes_requested. If status is provided, status takes precedence.' },
@@ -642,7 +675,6 @@ const spec = {
                   search: { type: 'string', maxLength: 200, description: 'Поиск по тексту сообщения (LIKE)' },
                   page: { type: 'integer', minimum: 1, default: 1 },
                   perPage: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
-                  limit: { type: 'integer', minimum: 1, maximum: 100, description: 'Alias for perPage for CLI/agent clients.' },
                 },
               },
             },
@@ -677,19 +709,12 @@ const spec = {
         tags: ['Items'],
         summary: 'Получить item с заметками и evidence',
         description: 'Возвращает item, заметки, structured evidence, связанные items, linked runtime error groups и permissions текущего пользователя. Требуется доступ к проекту.',
-        security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: {
-                type: 'object',
-                anyOf: [{ required: ['id'] }, { required: ['itemId'] }],
-                properties: {
-                  id: { type: 'string', format: 'uuid' },
-                  itemId: { type: 'string', format: 'uuid', description: 'Alias for id for CLI/agent clients.' },
-                },
-              },
+              schema: itemRequestSchema(),
             },
           },
         },
@@ -730,17 +755,16 @@ const spec = {
         tags: ['Items'],
         summary: 'Количество items по статусам',
         description: 'Возвращает количество items по каждому статусу для проекта. Требуется доступ к проекту.',
-        security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                anyOf: [{ required: ['projectId'] }, { required: ['projectSlug'] }],
+                required: ['projectId'],
                 properties: {
                   projectId: { type: 'string', format: 'uuid' },
-                  projectSlug: { type: 'string', pattern: '^[a-z0-9-]+$', description: 'Agent-friendly alias for selecting a project when the UUID is not known yet.' },
                   itemType: { $ref: '#/components/schemas/ItemType' },
                 },
               },
@@ -785,18 +809,12 @@ const spec = {
         tags: ['Items'],
         summary: 'Взять item в работу',
         description: 'Назначает текущего пользователя исполнителем и переводит статус в in_progress. Требуется project permission `workflow` (admin/owner/manager/developer).',
-        security: [{ BearerAuth: [] }],
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: {
-                type: 'object',
-                required: ['id'],
-                properties: {
-                  id: { type: 'string', format: 'uuid' },
-                },
-              },
+              schema: itemRequestSchema(),
             },
           },
         },
@@ -814,23 +832,18 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Подготовить item к human acceptance (resolve)',
-        description: 'Переводит item в статус done: implementation/evidence complete, waiting for human acceptance. Для done/review требуется свежий structured evidence record или evidence в этом запросе. Agent automation should complete all safe implementation, verification, commit, push, and staging work it can before resolve, and include result, level, coverage, environment, scenario, action, visibleResult, and item-specific acceptanceScope. Требуется project permission `workflow` (admin/owner/manager/developer).',
-        security: [{ BearerAuth: [] }],
+        description: 'Переводит item в статус done: implementation/evidence complete, waiting for human acceptance. Для done требуется inline structured evidence в этом запросе: result, level, coverage, environment, scenario, action, visibleResult, and item-specific acceptanceScope. Требуется project permission `workflow` (admin/owner/manager/developer).',
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: {
-                type: 'object',
-                required: ['id'],
-                properties: {
-                  id: { type: 'string', format: 'uuid' },
-                  resolutionNote: { type: 'string', maxLength: 5000 },
-                  branchName: { type: 'string', maxLength: 255 },
-                  mrUrl: { type: 'string', format: 'uri', maxLength: 500 },
-                  evidence: { $ref: '#/components/schemas/ItemEvidence' },
-                },
-              },
+              schema: itemRequestSchema({
+                resolutionNote: { type: 'string', maxLength: 5000 },
+                branchName: { type: 'string', maxLength: 255 },
+                mrUrl: { type: 'string', format: 'uri', maxLength: 500 },
+                evidence: { $ref: '#/components/schemas/ItemEvidenceInput' },
+              }),
             },
           },
         },
@@ -849,18 +862,12 @@ const spec = {
         tags: ['Items'],
         summary: 'Отменить item',
         description: 'Переводит item в статус cancelled. Требуется project permission `triage`; reporter может отменить свой `new` item.',
-        security: [{ BearerAuth: [] }],
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: {
-                type: 'object',
-                required: ['id'],
-                properties: {
-                  id: { type: 'string', format: 'uuid' },
-                },
-              },
+              schema: itemRequestSchema(),
             },
           },
         },
@@ -878,24 +885,19 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Обновить статус item',
-        description: 'Универсальный эндпоинт только для инженерных workflow-переходов в `in_progress` или `review`. Используйте `/items/claim` для начала нового item, `/items/resolve` для `done`, `/items/verify` для `verified`, `/items/request-changes` для `changes_requested`, `/items/cancel` для `cancelled` и `/items/reopen` для возврата в `new`. Переход в review требует свежий structured evidence record или evidence в этом запросе. Требуется project permission `workflow` (admin/owner/manager/developer).',
-        security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+        description: 'Универсальный эндпоинт только для инженерных workflow-переходов в `in_progress` или `review`. Используйте `/items/claim` для начала нового item, `/items/resolve` для `done`, `/items/verify` для `verified`, `/items/request-changes` для `changes_requested`, `/items/cancel` для `cancelled` и `/items/reopen` для возврата в `new`. Переход в review требует inline structured evidence в этом запросе, включая `result:"pass"` и `commitSha`. Требуется project permission `workflow` (admin/owner/manager/developer).',
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: {
-                type: 'object',
-                required: ['id', 'status'],
-                properties: {
-                  id: { type: 'string', format: 'uuid' },
-                  status: { type: 'string', enum: ['in_progress', 'review'] },
-                  branchName: { type: 'string', maxLength: 255 },
-                  mrUrl: { type: 'string', format: 'uri', maxLength: 500 },
-                  attemptCount: { type: 'integer', minimum: 0 },
-                  evidence: { $ref: '#/components/schemas/ItemEvidence' },
-                },
-              },
+              schema: itemRequestSchema({
+                status: { type: 'string', enum: [...UPDATE_ITEM_STATUS_TARGETS] },
+                branchName: { type: 'string', maxLength: 255 },
+                mrUrl: { type: 'string', format: 'uri', maxLength: 500 },
+                attemptCount: { type: 'integer', minimum: 0 },
+                evidence: { $ref: '#/components/schemas/ItemEvidenceInput' },
+              }, ['status']),
             },
           },
         },
@@ -914,20 +916,15 @@ const spec = {
         tags: ['Items'],
         summary: 'Принять item человеком',
         description: 'Переводит item из done в verified после human acceptance. Не перетирает resolvedById/resolvedAt, чтобы сохранить исполнителя done. Требуется project permission `triage` (admin/owner/manager).',
-        security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: {
-                type: 'object',
-                required: ['id'],
-                properties: {
-                  id: { type: 'string', format: 'uuid' },
-                  comment: { type: 'string', maxLength: 5000 },
-                  evidence: { $ref: '#/components/schemas/ItemEvidence' },
-                },
-              },
+              schema: itemRequestSchema({
+                comment: { type: 'string', maxLength: 5000 },
+                evidence: { $ref: '#/components/schemas/ItemEvidenceInput' },
+              }),
             },
           },
         },
@@ -946,24 +943,19 @@ const spec = {
         tags: ['Items'],
         summary: 'Вернуть item на правки',
         description: 'Переводит item из review/done/verified в changes_requested и добавляет actionable note с expected/actual context. Требуется project permission `triage` (admin/owner/manager).',
-        security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: {
-                type: 'object',
-                required: ['id', 'summary', 'expected', 'actual'],
-                properties: {
-                  id: { type: 'string', format: 'uuid' },
-                  summary: { type: 'string', minLength: 3, maxLength: 2000 },
-                  expected: { type: 'string', minLength: 1, maxLength: 2000 },
-                  actual: { type: 'string', minLength: 1, maxLength: 2000 },
-                  steps: { type: 'string', maxLength: 5000 },
-                  url: { type: 'string', maxLength: 1000 },
-                  evidence: { $ref: '#/components/schemas/ItemEvidence' },
-                },
-              },
+              schema: itemRequestSchema({
+                summary: { type: 'string', minLength: 3, maxLength: 2000 },
+                expected: { type: 'string', minLength: 1, maxLength: 2000 },
+                actual: { type: 'string', minLength: 1, maxLength: 2000 },
+                steps: { type: 'string', maxLength: 5000 },
+                url: { type: 'string', maxLength: 1000 },
+                evidence: { $ref: '#/components/schemas/ItemEvidenceInput' },
+              }, ['summary', 'expected', 'actual']),
             },
           },
         },
@@ -982,21 +974,16 @@ const spec = {
         tags: ['Items'],
         summary: 'Переоткрыть item',
         description: 'Возвращает item из done/verified/cancelled в статус new или сразу in_progress. Требуется project permission `triage` (admin/owner/manager).',
-        security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: {
-                type: 'object',
-                required: ['id'],
-                properties: {
-                  id: { type: 'string', format: 'uuid' },
-                  status: { type: 'string', enum: ['new', 'in_progress'], description: 'Optional target status. Defaults to new. Use in_progress to reopen and assign the item to the caller.' },
-                  reason: { type: 'string', enum: ['audit_failed', 'audit_blocked', 'staging_failed', 'regression', 'manual'], description: 'Optional reopen reason for structured history and audit logs.' },
-                  auditResult: { type: 'string', enum: ['fail', 'blocked'], description: 'Optional completed-item audit result that caused the reopen.' },
-                },
-              },
+              schema: itemRequestSchema({
+                status: { type: 'string', enum: ['new', 'in_progress'], description: 'Optional target status. Defaults to new. Use in_progress to reopen and assign the item to the caller.' },
+                reason: { type: 'string', enum: ['audit_failed', 'audit_blocked', 'staging_failed', 'regression', 'manual'], description: 'Optional reopen reason for structured history and audit logs.' },
+                auditResult: { type: 'string', enum: ['fail', 'blocked'], description: 'Optional completed-item audit result that caused the reopen.' },
+              }),
             },
           },
         },
@@ -1015,23 +1002,18 @@ const spec = {
         tags: ['Items'],
         summary: 'Обновить item',
         description: 'Обновляет поля item (itemType, message, priority, labels, assigneeId). Требуется project permission `triage` (admin/owner/manager).',
-        security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: {
-                type: 'object',
-                required: ['id'],
-                properties: {
-                  id: { type: 'string', format: 'uuid' },
-                  itemType: { $ref: '#/components/schemas/ItemType' },
-                  message: { type: 'string', minLength: 3 },
-                  assigneeId: { type: 'string', format: 'uuid', nullable: true },
-                  priority: { $ref: '#/components/schemas/ItemPriority' },
-                  labels: { type: 'array', items: { type: 'string', maxLength: 50 }, maxItems: 10 },
-                },
-              },
+              schema: itemRequestSchema({
+                itemType: { $ref: '#/components/schemas/ItemType' },
+                message: { type: 'string', minLength: 3 },
+                assigneeId: { type: 'string', format: 'uuid', nullable: true },
+                priority: { $ref: '#/components/schemas/ItemPriority' },
+                labels: { type: 'array', items: { type: 'string', maxLength: 50 }, maxItems: 10 },
+              }),
             },
           },
         },
@@ -1050,18 +1032,12 @@ const spec = {
         tags: ['Items'],
         summary: 'Удалить item',
         description: 'Удаляет item и связанные заметки. Требуется project permission `triage` (admin/owner/manager).',
-        security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: {
-                type: 'object',
-                required: ['id'],
-                properties: {
-                  id: { type: 'string', format: 'uuid' },
-                },
-              },
+              schema: itemRequestSchema(),
             },
           },
         },
@@ -1083,22 +1059,16 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Добавить structured evidence',
-        description: 'Добавляет проверочное evidence к item. Используется как gate для переходов в review/done. Требуется project permission `comment`.',
-        security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+        description: 'Добавляет supplemental structured evidence к item. Для переходов в review/done агентские workflow передают evidence inline в status request. Требуется project permission `comment`.',
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
                 allOf: [
-                  { $ref: '#/components/schemas/ItemEvidence' },
-                  {
-                    type: 'object',
-                    required: ['itemId'],
-                    properties: {
-                      itemId: { type: 'string', format: 'uuid' },
-                    },
-                  },
+                  { $ref: '#/components/schemas/ItemEvidenceInput' },
+                  itemRequestSchema(),
                 ],
               },
             },
@@ -1118,19 +1088,14 @@ const spec = {
         tags: ['Items'],
         summary: 'Добавить заметку',
         description: 'Добавляет комментарий к item. Требуется project permission `comment` (admin/owner/manager/developer/reporter).',
-        security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: {
-                type: 'object',
-                required: ['itemId', 'content'],
-                properties: {
-                  itemId: { type: 'string', format: 'uuid' },
-                  content: { type: 'string', minLength: 1, maxLength: 5000 },
-                },
-              },
+              schema: itemRequestSchema({
+                content: { type: 'string', minLength: 1, maxLength: 5000 },
+              }, ['content']),
             },
           },
         },
@@ -1152,7 +1117,7 @@ const spec = {
         tags: ['Items'],
         summary: 'Связать items',
         description: 'Создаёт связь между двумя items одного проекта. Требуется project permission `workflow` (admin/owner/manager/developer).',
-        security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
@@ -1183,7 +1148,7 @@ const spec = {
         tags: ['Items'],
         summary: 'Удалить связь items',
         description: 'Удаляет связь между items. Требуется project permission `workflow` (admin/owner/manager/developer).',
-        security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+        security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
@@ -1938,10 +1903,9 @@ const spec = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['fingerprint', 'environment', 'service', 'errorType'],
+                required: ['projectId', 'fingerprint', 'environment', 'service', 'errorType'],
                 properties: {
                   projectId: { type: 'string', format: 'uuid' },
-                  projectSlug: { type: 'string' },
                   source: { type: 'string', default: 'alertmanager' },
                   fingerprint: { type: 'string', maxLength: 200 },
                   environment: { type: 'string', maxLength: 80 },

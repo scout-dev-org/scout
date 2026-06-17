@@ -99,9 +99,9 @@ describe('Middleware', () => {
       expect(res.status).toBe(403);
     });
 
-    it('member CANNOT access items in another project by slug (403)', async () => {
+    it('member CANNOT use non-canonical projectSlug field (400)', async () => {
       const res = await post('/list', { projectSlug: 'other-project' }, ctx.memberToken);
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(400);
     });
 
     it('developer member can access items in their project (200)', async () => {

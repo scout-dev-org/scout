@@ -819,7 +819,7 @@ export default function ItemDetail() {
     setNoteSaving(true);
     try {
       await api('/api/items/add-note', {
-        itemId: item.id,
+        id: item.id,
         content: noteContent.trim(),
       });
       setNoteContent('');

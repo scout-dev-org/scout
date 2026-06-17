@@ -67,17 +67,6 @@ function deriveItemSource(data: ReturnType<typeof createItemSchema.parse>, apiKe
   return 'dashboard';
 }
 
-function resolveProjectLocator(projectId?: string, projectSlug?: string) {
-  const project = projectId
-    ? db.select().from(projects).where(eq(projects.id, projectId)).get()
-    : db.select().from(projects).where(eq(projects.slug, projectSlug!)).get();
-  if (!project) throw new NotFoundError('Project', 'PROJECT_NOT_FOUND');
-  if (projectSlug && project.slug !== projectSlug) {
-    throw new ValidationError('projectId and projectSlug refer to different projects', 'PROJECT_LOCATOR_MISMATCH');
-  }
-  return project;
-}
-
 function getRelatedItems(itemId: string) {
   const links = db.select().from(scoutItemLinks)
     .where(or(eq(scoutItemLinks.sourceItemId, itemId), eq(scoutItemLinks.targetItemId, itemId)))
@@ -167,11 +156,11 @@ export const itemRoutes = new Hono()
   .post('/list',
     zValidator('json', listItemsSchema),
     async (c) => {
-      const { projectId: requestedProjectId, projectSlug, itemType, status, statuses, priority, assigneeId, search, page, perPage, limit } = c.req.valid('json');
+      const { projectId, itemType, status, statuses, priority, assigneeId, search, page, perPage } = c.req.valid('json');
       const user = c.get('user');
-      const project = resolveProjectLocator(requestedProjectId, projectSlug);
-      const projectId = project.id;
-      const pageSize = perPage ?? limit ?? 20;
+      const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
+      if (!project) throw new NotFoundError('Project', 'PROJECT_NOT_FOUND');
+      const pageSize = perPage ?? 20;
 
       // Check project access
       if (!checkProjectAccess(user.id, user.role, projectId, c.get('apiKey'))) {
@@ -249,10 +238,10 @@ export const itemRoutes = new Hono()
   .post('/count',
     zValidator('json', countItemsSchema),
     async (c) => {
-      const { projectId: requestedProjectId, projectSlug, itemType } = c.req.valid('json');
+      const { projectId, itemType } = c.req.valid('json');
       const user = c.get('user');
-      const project = resolveProjectLocator(requestedProjectId, projectSlug);
-      const projectId = project.id;
+      const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
+      if (!project) throw new NotFoundError('Project', 'PROJECT_NOT_FOUND');
 
       // Check project access
       if (!checkProjectAccess(user.id, user.role, projectId, c.get('apiKey'))) {
@@ -476,15 +465,15 @@ export const itemRoutes = new Hono()
   .post('/add-evidence',
     zValidator('json', addEvidenceSchema),
     async (c) => {
-      const { itemId, ...evidence } = c.req.valid('json');
+      const { id, ...evidence } = c.req.valid('json');
       const user = c.get('user');
 
-      const item = db.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get();
+      const item = db.select().from(scoutItems).where(eq(scoutItems.id, id)).get();
       if (!item) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
       requireProjectPermission(user.id, user.role, item.projectId, 'comment', c.get('apiKey'));
 
-      const record = addItemEvidence(itemId, user, evidence);
-      logAudit({ userId: user.id, action: 'add_evidence', entityType: 'item', entityId: itemId, details: { kind: evidence.kind, environment: evidence.environment }, ipAddress: getClientIp(c) });
+      const record = addItemEvidence(id, user, evidence);
+      logAudit({ userId: user.id, action: 'add_evidence', entityType: 'item', entityId: id, details: { kind: evidence.kind, environment: evidence.environment }, ipAddress: getClientIp(c) });
       return c.json({ data: { ...record, userName: getUserName(record.userId) } }, 201);
     })
 
@@ -492,7 +481,7 @@ export const itemRoutes = new Hono()
   .post('/add-note',
     zValidator('json', addNoteSchema),
     async (c) => {
-      const { itemId, content } = c.req.valid('json');
+      const { id: itemId, content } = c.req.valid('json');
       const user = c.get('user');
 
       // Verify item exists
