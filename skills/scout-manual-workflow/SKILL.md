@@ -645,6 +645,9 @@ All API calls are `POST` JSON unless retrieving storage assets. Authenticate wit
 
 Rules:
 
+- Before the first Scout API mutation or status read in a session, fetch live OpenAPI from `$SCOUT_URL/api/docs/openapi.json` unless the exact endpoint and payload were already verified in the current session. Do not infer REST-style paths from names.
+- Treat response shape as wrapped: read payloads from `.data` first. Lists normally return `.data.items` plus `.data.pagination`; item reads return the item directly in `.data`.
+- If a Scout API call returns `text/html`, a dashboard page, or `API_ENDPOINT_NOT_FOUND`, stop probing similar URLs. Re-read live OpenAPI and correct the endpoint/method/body before retrying.
 - Current collection responses use `data.items` with `data.pagination`; normalize as `(.data.items // .items // [])` only after inspecting the first response, not as a substitute for reading the live shape.
 - To resolve the default project from `SCOUT_PROJECT_SLUG`, call `/api/projects/list` and read `.data.items[] | select(.slug == $slug) | .id`. Project-scoped API keys normally return only their own project.
 - Prefer one open-status list call with `statuses:["changes_requested","review","in_progress","new"]` and `perPage:100`. `/api/items/list` accepts either `projectId` or `projectSlug`, and accepts `limit` as an alias for `perPage`, but canonical examples should use `projectId`/`perPage` after the project is known.

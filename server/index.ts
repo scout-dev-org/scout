@@ -185,6 +185,24 @@ app.route('/api/v1', v1);
 // Backward compatibility: /api/* → same as /api/v1/*
 app.route('/api', v1);
 
+function getApiNotFoundHint(path: string): string {
+  if (/^\/api(?:\/v1)?\/items\/[0-9a-f-]{36}$/i.test(path)) {
+    return 'Use POST /api/items/get with JSON body { "id": "<item-id>" }. Scout item endpoints are POST JSON, not REST-style item URLs.';
+  }
+  return 'Inspect /api/docs/openapi.json and call the documented POST JSON endpoint.';
+}
+
+// Keep API misses machine-readable. Without this guard, wrong /api/* paths can
+// fall through to the dashboard SPA and look like successful HTML responses.
+app.all('/api/*', (c) => c.json({
+  error: 'API endpoint not found',
+  code: 'API_ENDPOINT_NOT_FOUND',
+  method: c.req.method,
+  path: c.req.path,
+  docs: '/api/docs/openapi.json',
+  hint: getApiNotFoundHint(c.req.path),
+}, 404));
+
 // Static files: screenshots, recordings — require authentication and project access.
 // Supports both Authorization header and ?token= query param (for <img src>, fetch without headers).
 app.use('/storage/*', storageAuth, async (c, next) => {

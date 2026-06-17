@@ -180,6 +180,8 @@ Base path: `/api/v1/` (or `/api/` for backward compatibility).
 
 Agent/CLI convenience: `/api/items/list` and `/api/items/count` accept `projectSlug` instead of `projectId`; `/api/items/list` accepts `limit` as a `perPage` alias; item endpoints accept `itemId` as an alias for `id` where the body otherwise uses `id`.
 
+Responses are wrapped in `data`. For example, read an item with `POST /api/items/get` and body `{ "id": "<item-id>" }`, then read the item from `.data`. Scout does not use REST-style item URLs such as `/api/items/<id>`; unknown `/api/*` paths return JSON `API_ENDPOINT_NOT_FOUND` with a link to `/api/docs/openapi.json` instead of dashboard HTML.
+
 Interactive docs: `https://your-scout.example/api/docs`
 
 **Key endpoints:**
