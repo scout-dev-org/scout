@@ -103,7 +103,7 @@ Read Scout access from environment variables first. If required variables are mi
 
 - `SCOUT_URL`: Scout base URL, for example `https://your-scout.example`.
 - `SCOUT_API_KEY`: project-scoped API key in `sk_live_*` format. Prefer a key created from Scout via `Projects` → target project → `Manage integrations` → `Create agent key`.
-- `SCOUT_PROJECT_ID`: Required default project id.
+- `SCOUT_PROJECT_SLUG`: Required default project slug.
 
 Agent keys should have only the scopes needed for manual issue work, such as reading items, adding notes, workflow/triage actions, related-item links, and reading storage evidence. Never commit Scout credentials, cookies, JWTs, API keys, `.env.local`, or generated credential files. Do not paste real secrets into documentation, PR bodies, issue text, or durable notes.
 
@@ -125,7 +125,7 @@ When the user asks to work from Scout:
 
 1. Detect whether the prompt contains a Scout item id or item URL.
 2. If an item id or URL is present, fetch that item first and use single-item scope.
-3. If no item id or URL is present, use `SCOUT_PROJECT_ID` and choose full active queue scope by default unless the user explicitly requested next/one-item scope.
+3. If no item id or URL is present, resolve `SCOUT_PROJECT_SLUG` to the current project through live OpenAPI and choose full active queue scope by default unless the user explicitly requested next/one-item scope.
 4. In single-next scope, inspect enough `changes_requested`, `review`, `in_progress`, `new`, and triage-worthy `note` items to choose the best next actionable item, then stop after that item or shared-root cluster reaches the furthest honest status.
 5. In full active queue scope, inspect `changes_requested`, `review`, `in_progress`, `new`, and triage-worthy `note` items before choosing work. Do not stop after one item unless the remaining queue is honestly blocked, waiting on target verification, not actionable, or unsafe.
 6. For every item that may move, fetch the full item before editing code or changing status.
@@ -649,7 +649,7 @@ Rules:
 - Use the method and JSON body shown by live OpenAPI. Do not infer REST-style paths, query-string item lookups, or payload fields from endpoint names.
 - Read successful JSON payloads from `.data`. For lists, read `.data.items` and `.data.pagination`.
 - If a Scout API call returns `text/html`, a dashboard page, or `API_ENDPOINT_NOT_FOUND`, stop. Re-read live OpenAPI and retry only with the documented endpoint/method/body.
-- Use `SCOUT_PROJECT_ID` as `projectId` for item listing and counting.
+- Resolve `SCOUT_PROJECT_SLUG` once at the start of the run through the documented `/projects/list` endpoint: find a project whose `slug` equals `SCOUT_PROJECT_SLUG`, then use that project's `id` as the internal `projectId` for item listing and counting. If no listed project matches the slug, stop with a precise missing-access or wrong-slug blocker.
 - Fetch the full item with the documented `/items/get` endpoint before code edits or status changes.
 - Use `/api/items/claim`, `/api/items/add-note`, `/api/items/link`, `/api/items/add-evidence`, `/api/items/update-status`, `/api/items/resolve`, `/api/items/request-changes`, and `/api/items/reopen` only when the status/evidence rules above allow that action. `/api/items/verify` is for explicit human acceptance, not normal AI completion.
 - Scout API schemas use optional string fields, not nullable string fields. Omit absent optional strings instead of sending `null`, especially refs, URL/result fields, risks, branch, PR/MR, commit and deploy fields.

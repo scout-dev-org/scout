@@ -20,7 +20,7 @@ The command works without arguments and defaults to full active queue scope. Tex
 
 ## Developer linked setup
 
-Installed `/scout` works without a local Scout repository clone when the command, skill, and Scout API credentials (`SCOUT_URL`, `SCOUT_PROJECT_ID`, `SCOUT_API_KEY`) are present. The workflow must use live OpenAPI as its only API contract.
+Installed `/scout` works without a local Scout repository clone when the command, skill, and Scout API credentials (`SCOUT_URL`, `SCOUT_PROJECT_SLUG`, `SCOUT_API_KEY`) are present. The workflow must use live OpenAPI as its only API contract.
 
 When running OpenCode from this repository, no skill installation is required. `.opencode/opencode.json` loads `skills/`, and `.opencode/commands/scout.md` provides `/scout` from the checkout.
 
@@ -90,7 +90,7 @@ For a shell session, use `export`:
 ```bash
 export SCOUT_URL="https://your-scout.example"
 export SCOUT_API_KEY="<CHANGE-ME-sk_live-api-key>"
-export SCOUT_PROJECT_ID="<CHANGE-ME-project-id>"
+export SCOUT_PROJECT_SLUG="<CHANGE-ME-project-slug>"
 ```
 
 For a dotenv file, omit `export`:
@@ -98,7 +98,7 @@ For a dotenv file, omit `export`:
 ```dotenv
 SCOUT_URL=https://your-scout.example
 SCOUT_API_KEY=<CHANGE-ME-sk_live-api-key>
-SCOUT_PROJECT_ID=<CHANGE-ME-project-id>
+SCOUT_PROJECT_SLUG=<CHANGE-ME-project-slug>
 ```
 
 If you load a dotenv file with plain shell `source`, export variables before launching the agent:

@@ -170,7 +170,7 @@ npx skills update scout-manual-workflow -g -y
 
 Create an agent API key from the dashboard: `Projects` → target project → `Manage integrations` → `Create agent key`. The full `sk_live_*` key is shown once together with a ready-to-copy `SCOUT_*` env block. Store it in a password manager, shell environment, or local ignored `.env`, not in the repository.
 
-After installation, `/scout` does not require a local Scout repository clone. It needs the installed `scout-manual-workflow` skill, the installed command, and Scout API credentials (`SCOUT_URL`, `SCOUT_PROJECT_ID`, `SCOUT_API_KEY`). At the start of the run the skill reads `$SCOUT_URL/api/docs/openapi.json` and follows that contract exactly.
+After installation, `/scout` does not require a local Scout repository clone. It needs the installed `scout-manual-workflow` skill, the installed command, and Scout API credentials (`SCOUT_URL`, `SCOUT_PROJECT_SLUG`, `SCOUT_API_KEY`). At the start of the run the skill reads `$SCOUT_URL/api/docs/openapi.json`, resolves the slug to the project id through the documented project endpoints, and follows that contract exactly.
 
 Scout developers who want live command or skill edits outside this checkout should use the linked setup in `skills/README.md` instead of reinstalling after each change. Restart OpenCode after changing commands, skills, or OpenCode config.
 
