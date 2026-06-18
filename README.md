@@ -113,7 +113,7 @@ The dashboard shows a ready-to-copy snippet for each project under **Projects** 
 Responsive React SPA served from the same port as the API.
 
 - **Items** — Bug/note/task list with human queue tabs (`Open`, `In Progress`, `Needs Review`, `Needs Acceptance`, `Accepted`, `Archived`), type/priority filters, search, pagination, manual creation, and note-to-task triage for humans or AI agents. Detail view with debug context, screenshot lightbox, rrweb session player plus recording summary, notes timeline, related items, linked runtime errors, resolve modal, and simple human verify/request-changes actions
-- **Errors** — Runtime error groups with environment/service/fingerprint, route template, status/error classification, occurrence counts, linked Scout item, and Grafana/Tempo context links when provided by integrations
+- **Errors** — Runtime error groups with environment/service/fingerprint, route template, status/error classification, occurrence counts, auto-accepted `verified` linked Scout system item, and Grafana/Tempo context links when provided by integrations
 - **Projects** — CRUD with allowed origins for CORS/SSO and links to per-project integrations
 - **Users** — CRUD with system roles and per-project role assignment
 - **Webhooks** — Per-project event notifications (Slack-compatible)
@@ -245,6 +245,7 @@ scout.example.com {
 | `SCOUT_ERROR_BRIDGE_BATCH_SIZE` | `20` | Error bridge jobs processed per worker tick |
 | `SCOUT_ERROR_BRIDGE_MAX_ATTEMPTS` | `10` | Max delivery attempts before a bridge job is marked dead |
 | `SCOUT_ERROR_SAMPLE_MAX_JSON_LENGTH` | `20000` | Max stored JSON length for error group sample payloads and trace diagnostics |
+| `SCOUT_ERROR_REGRESSION_COOLDOWN_MS` | `1800000` | Minimum elapsed time before a recurring linked runtime error updates `lastRegressionAt`; it does not reopen or activate the linked Scout item |
 | `SCOUT_GRAFANA_URL` | — | Viewer-accessible Grafana URL used to rewrite Alertmanager Prometheus generator links for dashboard users. If users should open links without a second login, configure Grafana/proxy anonymous Viewer access for that public URL; Scout does not embed Grafana credentials in links. |
 | `SCOUT_GRAFANA_TEMPO_DATASOURCE` | `Tempo` | Grafana Tempo datasource name/UID used when Scout builds trace links |
 | `SCOUT_TEMPO_URL` | — | Optional internal Tempo API base URL. When set, Alertmanager bridge jobs search matching traces by service/env/method/route/status and store trace diagnostics in error groups. |

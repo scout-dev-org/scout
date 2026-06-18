@@ -1,7 +1,7 @@
 import { and, count, desc, eq, inArray, lte } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
-import { errorGroupOccurrences, errorGroups, projects, scoutBridgeJobs, scoutItems, scoutItemNotes, type ErrorGroup } from '../db/schema.js';
+import { errorGroupOccurrences, errorGroups, projects, scoutBridgeJobs, scoutItems, type ErrorGroup } from '../db/schema.js';
 import { NotFoundError } from '../lib/errors.js';
 import { eventBus } from '../lib/event-bus.js';
 import { logAudit } from './audit.js';
@@ -10,6 +10,12 @@ import { dispatchWebhooks } from './webhooks.js';
 type ItemStatusChange = {
   item: typeof scoutItems.$inferSelect;
   oldStatus: typeof scoutItems.$inferSelect.status;
+  newStatus: typeof scoutItems.$inferSelect.status;
+  errorGroupId: string;
+};
+
+type CreatedLinkedItem = {
+  item: typeof scoutItems.$inferSelect;
   errorGroupId: string;
 };
 
@@ -51,6 +57,7 @@ const DEFAULT_BRIDGE_BACKOFF_MAX_MS = 60 * 60 * 1000;
 const DEFAULT_TEMPO_SEARCH_WINDOW_MS = 15 * 60 * 1000;
 const DEFAULT_TEMPO_TIMEOUT_MS = 2_000;
 const MAX_TEMPO_SPANS = 8;
+const AUTO_ACCEPTED_RUNTIME_ITEM_NOTE = 'Auto-accepted system observability item. See linked runtime error group for operational details.';
 
 type TempoSearchTrace = {
   traceID?: string;
@@ -366,7 +373,8 @@ export function upsertErrorGroup(input: ErrorUpsertInput, resolvedProjectId?: st
   const existing = db.select().from(errorGroups)
     .where(and(eq(errorGroups.projectId, projectId), eq(errorGroups.environment, input.environment), eq(errorGroups.fingerprint, input.fingerprint)))
     .get();
-  const reopenedItemStatusChanges: ItemStatusChange[] = [];
+  const createdLinkedItems: CreatedLinkedItem[] = [];
+  const autoAcceptedItemStatusChanges: ItemStatusChange[] = [];
 
   const group = db.transaction((tx) => {
     if (!existing) {
@@ -377,9 +385,12 @@ export function upsertErrorGroup(input: ErrorUpsertInput, resolvedProjectId?: st
         itemType: 'bug',
         source: 'api',
         message: buildItemMessage(input),
+        status: 'verified',
         priority: priorityForSeverity(input.severity),
         labels: JSON.stringify(['gateway', 'observability', 'auto-created', `env:${input.environment}`, `service:${input.service}`, `error:${input.errorType}`]),
-        metadata: JSON.stringify({ source: 'error_group', fingerprint: input.fingerprint }),
+        metadata: JSON.stringify({ source: 'error_group', fingerprint: input.fingerprint, autoAccepted: true }),
+        resolutionNote: AUTO_ACCEPTED_RUNTIME_ITEM_NOTE,
+        resolvedAt: timestamp,
         createdAt: timestamp,
         updatedAt: timestamp,
       }).run();
@@ -415,6 +426,10 @@ export function upsertErrorGroup(input: ErrorUpsertInput, resolvedProjectId?: st
       }).run();
       insertOccurrence(tx, groupId, input, timestamp, samplePayload);
       enforceOccurrenceLimit(tx, groupId);
+      createdLinkedItems.push({
+        item: tx.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get()!,
+        errorGroupId: groupId,
+      });
       return tx.select().from(errorGroups).where(eq(errorGroups.id, groupId)).get()!;
     }
 
@@ -423,7 +438,7 @@ export function upsertErrorGroup(input: ErrorUpsertInput, resolvedProjectId?: st
     const linkedItem = existing.linkedItemId
       ? tx.select().from(scoutItems).where(eq(scoutItems.id, existing.linkedItemId)).get() ?? null
       : null;
-    const reopenAsRegression = shouldReopenRegression(existing, linkedItem, input, timestamp, ignoredActive);
+    const recordRegression = shouldRecordRegression(existing, linkedItem, input, timestamp, ignoredActive);
     tx.update(errorGroups).set({
       source: input.source,
       service: input.service,
@@ -443,30 +458,25 @@ export function upsertErrorGroup(input: ErrorUpsertInput, resolvedProjectId?: st
       grafanaTraceUrl: input.grafanaTraceUrl ?? existing.grafanaTraceUrl,
       samplePayload: samplePayload ?? existing.samplePayload,
       lastRelease: input.release ?? existing.lastRelease,
-      lastRegressionAt: reopenAsRegression ? timestamp : existing.lastRegressionAt,
+      lastRegressionAt: recordRegression ? timestamp : existing.lastRegressionAt,
       updatedAt: now(),
     }).where(eq(errorGroups.id, existing.id)).run();
     insertOccurrence(tx, existing.id, input, timestamp, samplePayload);
     enforceOccurrenceLimit(tx, existing.id);
 
-    if (reopenAsRegression && linkedItem) {
+    if (linkedItem && linkedItem.status !== 'verified' && linkedItem.status !== 'cancelled') {
       tx.update(scoutItems).set({
-        status: 'new',
+        status: 'verified',
         assigneeId: null,
         resolvedById: null,
-        resolvedAt: null,
+        resolutionNote: AUTO_ACCEPTED_RUNTIME_ITEM_NOTE,
+        resolvedAt: timestamp,
         updatedAt: now(),
       }).where(eq(scoutItems.id, linkedItem.id)).run();
-      tx.insert(scoutItemNotes).values({
-        id: randomUUID(),
-        itemId: linkedItem.id,
-        content: JSON.stringify({ type: 'status_change', from: linkedItem.status, to: 'new', reason: 'regression', release: input.release ?? null }),
-        type: 'status_change',
-        createdAt: now(),
-      }).run();
-      reopenedItemStatusChanges.push({
+      autoAcceptedItemStatusChanges.push({
         item: tx.select().from(scoutItems).where(eq(scoutItems.id, linkedItem.id)).get()!,
         oldStatus: linkedItem.status,
+        newStatus: 'verified',
         errorGroupId: existing.id,
       });
     }
@@ -474,22 +484,34 @@ export function upsertErrorGroup(input: ErrorUpsertInput, resolvedProjectId?: st
     return tx.select().from(errorGroups).where(eq(errorGroups.id, existing.id)).get()!;
   });
 
-  for (const { item, oldStatus, errorGroupId } of reopenedItemStatusChanges) {
+  for (const { item, errorGroupId } of createdLinkedItems) {
     logAudit({
       userId: null,
-      action: 'reopen_item',
+      action: 'create_item',
       entityType: 'item',
       entityId: item.id,
-      details: { status: 'new', reason: 'regression', errorGroupId, release: input.release ?? null },
+      details: { projectId: item.projectId, itemType: item.itemType, source: item.source, priority: item.priority, status: item.status, autoAccepted: true, errorGroupId },
     });
-    dispatchWebhooks(item.projectId, 'item.status_changed', { item, oldStatus, newStatus: 'new' }).catch(() => {});
-    eventBus.publish({ type: 'item.status_changed', projectId: item.projectId, payload: { item, oldStatus, newStatus: 'new' } });
+    dispatchWebhooks(item.projectId, 'item.created', { item }).catch(() => {});
+    eventBus.publish({ type: 'item.created', projectId: item.projectId, payload: { item } });
+  }
+
+  for (const { item, oldStatus, newStatus, errorGroupId } of autoAcceptedItemStatusChanges) {
+    logAudit({
+      userId: null,
+      action: 'auto_accept_runtime_item',
+      entityType: 'item',
+      entityId: item.id,
+      details: { status: newStatus, oldStatus, errorGroupId, release: input.release ?? null },
+    });
+    dispatchWebhooks(item.projectId, 'item.status_changed', { item, oldStatus, newStatus }).catch(() => {});
+    eventBus.publish({ type: 'item.status_changed', projectId: item.projectId, payload: { item, oldStatus, newStatus } });
   }
 
   return group;
 }
 
-function shouldReopenRegression(
+function shouldRecordRegression(
   existing: ErrorGroup,
   linkedItem: typeof scoutItems.$inferSelect | null,
   input: ErrorUpsertInput,
@@ -497,7 +519,7 @@ function shouldReopenRegression(
   ignoredActive: boolean,
 ): boolean {
   if (ignoredActive) return false;
-  if (!linkedItem || (linkedItem.status !== 'done' && linkedItem.status !== 'verified' && linkedItem.status !== 'cancelled')) return false;
+  if (!linkedItem || linkedItem.status === 'cancelled') return false;
 
   if (input.release && existing.lastRelease && input.release !== existing.lastRelease) return true;
 

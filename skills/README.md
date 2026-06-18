@@ -112,4 +112,4 @@ opencode
 
 Do not commit Scout API keys, cookies, JWTs, or environment files with real credentials.
 
-For runtime error group work, the agent key also needs the relevant `errors:*` scopes. Use `errors:read` for linked error inspection, `errors:triage` for ignore/unignore actions, and `errors:write` only for ingestion/upsert automation. The Alertmanager bridge shared secret is server-side integration material, not a normal manual-agent credential.
+For runtime error group work, the agent key also needs the relevant `errors:*` scopes. Use `errors:read` for linked error inspection, `errors:triage` for ignore/unignore actions, and `errors:write` only for ingestion/upsert automation. Runtime ingestion auto-accepts linked system items as `verified`; normal agents should treat them as operational context unless explicitly asked to audit runtime errors. The Alertmanager bridge shared secret is server-side integration material, not a normal manual-agent credential.

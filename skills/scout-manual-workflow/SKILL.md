@@ -295,14 +295,15 @@ Scout widget items may include structured browser diagnostics in `debugContext`.
 
 ## Runtime Error Group Items
 
-Scout may contain bug items created or linked by the runtime error workflow. Treat linked runtime errors as operational evidence, not as ordinary free-form reporter text.
+Scout may contain bug items created or linked by the runtime error workflow. Auto-created runtime items are system evidence and are normally already `verified`; treat linked runtime errors as operational evidence, not as ordinary free-form reporter text or human-acceptance queue work.
 
 1. When an item mentions runtime errors, error groups, Alertmanager, Grafana, Tempo, trace ids, request ids, fingerprints, or linked runtime errors, inspect the linked error context before changing code or status.
 2. Use the Scout API/UI to read the error group summary when access exists: environment, service, fingerprint, route template, method, upstream service, error type, status code/class, occurrence count, first/last seen, sample request id, sample trace id and linked item id.
 3. Follow Grafana/Tempo links or run equivalent log/metric/trace queries only when needed to verify root cause, recurrence, deploy impact, or acceptance. Do not copy raw logs, private payloads, tokens, cookies, headers or full secret-bearing URLs into Scout notes.
 4. Preserve the workflow split: Grafana stack owns telemetry evidence; Scout owns triage/status/evidence; application code owns the fix. Do not turn Scout notes into a log store.
 5. For completion, verify both the item acceptance and the relevant runtime signal when feasible: no recurrence after the fix/deploy, expected metric/trace/log behavior, or a clear reason why recurrence cannot be observed yet.
-6. If the error group is ignored, resolved, reopened as regression, or linked to a different root cause, record that status explicitly in the Scout note/evidence before moving the item.
+6. Do not move an auto-created runtime item out of `verified` solely because the error recurred; recurring signals update the error group and `lastRegressionAt` while the linked item remains system evidence.
+7. If the error group is ignored, resolved, recorded as a regression, or linked to a different root cause, record that status explicitly in the Scout note/evidence before moving any user-visible item.
 
 ## External Provider And Stateful Preconditions
 

@@ -99,8 +99,10 @@ describe('Error integrations routes', () => {
     samplePayload: { Authorization: 'redaction-test-value', safe: 'value' },
   };
 
-  it('upsert creates error group and linked Scout item', async () => {
+  it('upsert creates error group and auto-accepted linked Scout item', async () => {
     const key = await createApiKey(['errors:write']);
+    const events: SSEEvent[] = [];
+    const unsubscribe = eventBus.subscribe((event) => events.push(event));
     const res = await upsert({
       ...basePayload,
       projectId: ctx.projectId,
@@ -110,6 +112,7 @@ describe('Error integrations routes', () => {
         safe: 'value',
       },
     }, key);
+    unsubscribe();
 
     expect(res.status).toBe(201);
     const body = await res.json() as any;
@@ -118,7 +121,16 @@ describe('Error integrations routes', () => {
 
     const item = ctx.db.select().from(scoutItems).where(eq(scoutItems.id, body.data.errorGroup.linkedItemId)).get();
     expect(item?.itemType).toBe('bug');
+    expect(item?.status).toBe('verified');
     expect(item?.labels).toContain('auto-created');
+    expect(item?.metadata).toContain('autoAccepted');
+    expect(item?.resolutionNote).toContain('Auto-accepted system observability item');
+    expect(item?.resolvedAt).toBeTruthy();
+    expect(events.some((event) => event.type === 'item.created'
+      && event.projectId === ctx.projectId
+      && (event.payload.item as { status?: string } | undefined)?.status === 'verified')).toBe(true);
+    const audit = ctx.db.select().from(auditLog).where(eq(auditLog.entityId, item!.id)).all();
+    expect(audit.some((entry) => entry.action === 'create_item' && entry.details?.includes('autoAccepted'))).toBe(true);
     expect(body.data.errorGroup.samplePayload).not.toContain('redaction-test-value');
     expect(body.data.errorGroup.samplePayload).not.toContain('redaction-url-secret');
   });
@@ -133,6 +145,7 @@ describe('Error integrations routes', () => {
     expect(body.data.errorGroup.occurrenceCount).toBe(2);
     expect(ctx.db.select().from(errorGroups).all()).toHaveLength(1);
     expect(ctx.db.select().from(scoutItems).all()).toHaveLength(1);
+    expect(ctx.db.select().from(scoutItems).get()?.status).toBe('verified');
   });
 
   it('ignored group updates counters without creating a new item', async () => {
@@ -193,7 +206,7 @@ describe('Error integrations routes', () => {
     expect(res.status).toBe(400);
   });
 
-  it('does not reopen linked done item within regression cooldown', async () => {
+  it('auto-accepts existing linked done item without opening the queue', async () => {
     vi.stubEnv('SCOUT_ERROR_REGRESSION_COOLDOWN_MS', String(60 * 60 * 1000));
     const key = await createApiKey(['errors:write']);
     const first = await upsert({ ...basePayload, projectId: ctx.projectId, occurredAt: '2026-01-01T00:00:00.000Z' }, key);
@@ -202,10 +215,12 @@ describe('Error integrations routes', () => {
 
     await upsert({ ...basePayload, projectId: ctx.projectId, occurredAt: '2026-01-01T00:10:00.000Z' }, key);
     const item = ctx.db.select().from(scoutItems).where(eq(scoutItems.id, firstBody.data.errorGroup.linkedItemId)).get();
-    expect(item?.status).toBe('done');
+    expect(item?.status).toBe('verified');
+    const audit = ctx.db.select().from(auditLog).where(eq(auditLog.entityId, firstBody.data.errorGroup.linkedItemId)).all();
+    expect(audit.some((entry) => entry.action === 'auto_accept_runtime_item')).toBe(true);
   });
 
-  it('reopens linked verified item after regression cooldown', async () => {
+  it('records regression without reopening linked verified item after cooldown', async () => {
     vi.stubEnv('SCOUT_ERROR_REGRESSION_COOLDOWN_MS', String(60 * 60 * 1000));
     const key = await createApiKey(['errors:write']);
     const first = await upsert({ ...basePayload, projectId: ctx.projectId, occurredAt: '2026-01-01T00:00:00.000Z' }, key);
@@ -217,17 +232,19 @@ describe('Error integrations routes', () => {
     await upsert({ ...basePayload, projectId: ctx.projectId, occurredAt: '2026-01-01T02:00:00.000Z' }, key);
     unsubscribe();
     const item = ctx.db.select().from(scoutItems).where(eq(scoutItems.id, firstBody.data.errorGroup.linkedItemId)).get();
-    expect(item?.status).toBe('new');
+    expect(item?.status).toBe('verified');
+    const group = ctx.db.select().from(errorGroups).where(eq(errorGroups.id, firstBody.data.errorGroup.id)).get();
+    expect(group?.lastRegressionAt).toBe('2026-01-01T02:00:00.000Z');
 
     expect(events.some((event) => event.type === 'item.status_changed'
       && event.projectId === ctx.projectId
       && event.payload.oldStatus === 'verified'
-      && event.payload.newStatus === 'new')).toBe(true);
+      && event.payload.newStatus === 'new')).toBe(false);
     const audit = ctx.db.select().from(auditLog).where(eq(auditLog.entityId, firstBody.data.errorGroup.linkedItemId)).all();
-    expect(audit.some((entry) => entry.action === 'reopen_item' && entry.details?.includes('regression'))).toBe(true);
+    expect(audit.some((entry) => entry.action === 'reopen_item')).toBe(false);
   });
 
-  it('reopens linked done item when release changes', async () => {
+  it('records release-change regression and auto-accepts existing linked done item', async () => {
     vi.stubEnv('SCOUT_ERROR_REGRESSION_COOLDOWN_MS', String(60 * 60 * 1000));
     const key = await createApiKey(['errors:write']);
     const first = await upsert({ ...basePayload, projectId: ctx.projectId, occurredAt: '2026-01-01T00:00:00.000Z', release: 'release-a' }, key);
@@ -236,10 +253,12 @@ describe('Error integrations routes', () => {
 
     await upsert({ ...basePayload, projectId: ctx.projectId, occurredAt: '2026-01-01T00:10:00.000Z', release: 'release-b' }, key);
     const item = ctx.db.select().from(scoutItems).where(eq(scoutItems.id, firstBody.data.errorGroup.linkedItemId)).get();
-    expect(item?.status).toBe('new');
+    expect(item?.status).toBe('verified');
+    const group = ctx.db.select().from(errorGroups).where(eq(errorGroups.id, firstBody.data.errorGroup.id)).get();
+    expect(group?.lastRegressionAt).toBe('2026-01-01T00:10:00.000Z');
   });
 
-  it('does not reopen ignored linked item', async () => {
+  it('auto-accepts ignored linked item without unignoring group', async () => {
     vi.stubEnv('SCOUT_ERROR_REGRESSION_COOLDOWN_MS', String(60 * 60 * 1000));
     const key = await createApiKey(['errors:write', 'errors:triage']);
     const first = await upsert({ ...basePayload, projectId: ctx.projectId, occurredAt: '2026-01-01T00:00:00.000Z' }, key);
@@ -253,7 +272,9 @@ describe('Error integrations routes', () => {
 
     await upsert({ ...basePayload, projectId: ctx.projectId, occurredAt: '2026-01-01T02:00:00.000Z' }, key);
     const item = ctx.db.select().from(scoutItems).where(eq(scoutItems.id, firstBody.data.errorGroup.linkedItemId)).get();
-    expect(item?.status).toBe('done');
+    expect(item?.status).toBe('verified');
+    const group = ctx.db.select().from(errorGroups).where(eq(errorGroups.id, firstBody.data.errorGroup.id)).get();
+    expect(group?.state).toBe('ignored');
   });
 
   it('caps stored occurrences per group', async () => {

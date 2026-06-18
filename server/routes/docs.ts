@@ -1895,7 +1895,7 @@ const spec = {
       post: {
         tags: ['Error Integrations'],
         summary: 'Create or update runtime error group',
-        description: 'Upserts an error group and linked Scout item from observability/runtime data. Requires `write_errors` project permission or API key scope `errors:write`.',
+        description: 'Upserts an error group from observability/runtime data. New linked Scout items are auto-accepted as `verified` system evidence, and existing non-cancelled linked runtime items are normalized to `verified` on recurrence instead of reopening into the normal work queue. Requires `write_errors` project permission or API key scope `errors:write`.',
         security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
         requestBody: {
           required: true,
