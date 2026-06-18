@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import { itemRoutes } from '../server/routes/items.js';
-import { projects, scoutItems } from '../server/db/schema.js';
+import { projects, scoutItemEvidence, scoutItems } from '../server/db/schema.js';
 import { createTestContext, type TestContext } from './helpers.js';
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
@@ -274,10 +274,40 @@ describe('Items routes', () => {
     expect(body.data.resolutionNote).toBe('Fixed the button handler');
   });
 
-  it('POST /resolve — from new fails (invalid transition)', async () => {
+  it('POST /resolve — from new to done with strong evidence', async () => {
     const item = await createTestItem();
-    const res = await post('/resolve', { id: item.id }, ctx.developerToken);
-    expect(res.status).toBe(400);
+    const res = await post('/resolve', {
+      id: item.id,
+      resolutionNote: 'Completed from new with target evidence',
+      branchName: 'dev',
+      evidence: testEvidence({ scenario: 'Resolve item directly from new' }),
+    }, ctx.developerToken);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.data.status).toBe('done');
+    expect(body.data.assigneeId).toBe(ctx.developerId);
+    expect(body.data.resolvedById).toBe(ctx.developerId);
+    expect(body.data.resolutionNote).toBe('Completed from new with target evidence');
+  });
+
+  it('POST /resolve — accepts nullable optional evidence fields', async () => {
+    const item = await createTestItem();
+
+    const res = await post('/resolve', {
+      id: item.id,
+      evidence: testEvidence({
+        scenario: 'Resolve item with nullable optional evidence fields',
+        role: null,
+        uncheckedRisks: null,
+        risks: null,
+      }),
+    }, ctx.developerToken);
+
+    expect(res.status).toBe(200);
+    const stored = ctx.db.select().from(scoutItemEvidence).where(eq(scoutItemEvidence.itemId, item.id)).get();
+    expect(stored?.kind).toBe('verification');
+    expect(stored?.uncheckedRisks).toBeNull();
   });
 
   it('POST /resolve — rejects weak non-acceptance evidence', async () => {
@@ -293,6 +323,43 @@ describe('Items routes', () => {
     }, ctx.developerToken);
 
     expect(res.status).toBe(400);
+  });
+
+  it('POST /resolve — from changes_requested to done with strong evidence', async () => {
+    const item = await createTestItem();
+    await resolveTestItem(item.id);
+    await post('/request-changes', {
+      id: item.id,
+      summary: 'Needs clearer evidence',
+      expected: 'Completion evidence names the checked path',
+      actual: 'Evidence was incomplete',
+    }, ctx.adminToken);
+
+    const res = await post('/resolve', {
+      id: item.id,
+      evidence: testEvidence({ scenario: 'Resolve item after requested changes' }),
+    }, ctx.developerToken);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.data.status).toBe('done');
+    expect(body.data.resolvedById).toBe(ctx.developerId);
+  });
+
+  it('POST /resolve — already done is idempotent', async () => {
+    const item = await createTestItem();
+    await resolveTestItem(item.id, ctx.developerToken, { resolutionNote: 'First completion' });
+
+    const res = await post('/resolve', {
+      id: item.id,
+      resolutionNote: 'Retry completion',
+      evidence: testEvidence({ scenario: 'Retry resolve for already done item' }),
+    }, ctx.developerToken);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.data.status).toBe('done');
+    expect(body.data.resolutionNote).toBe('Retry completion');
   });
 
   it('POST /verify — triager can accept a done item', async () => {

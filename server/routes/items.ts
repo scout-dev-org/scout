@@ -14,7 +14,7 @@ import {
   deleteItemSchema, updateItemSchema, reopenItemSchema,
   linkItemSchema, unlinkItemSchema,
 } from '../lib/schemas.js';
-import { createItem, claimItem, updateItemStatus, deleteItem, updateItem, reopenItem, addItemEvidence } from '../services/items.js';
+import { createItem, claimItem, resolveItem, updateItemStatus, deleteItem, updateItem, reopenItem, addItemEvidence } from '../services/items.js';
 import { logAudit, getClientIp } from '../services/audit.js';
 import { dispatchWebhooks } from '../services/webhooks.js';
 import { eventBus } from '../lib/event-bus.js';
@@ -290,17 +290,27 @@ export const itemRoutes = new Hono()
       const user = c.get('user');
 
       // Check project access via item's projectId
-      const existing = db.select({ projectId: scoutItems.projectId }).from(scoutItems).where(eq(scoutItems.id, id)).get();
+      const existing = db.select({
+        projectId: scoutItems.projectId,
+        status: scoutItems.status,
+        assigneeId: scoutItems.assigneeId,
+      }).from(scoutItems).where(eq(scoutItems.id, id)).get();
       if (!existing) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
       requireProjectPermission(user.id, user.role, existing.projectId, 'workflow', c.get('apiKey'));
 
-      const oldStatus = db.select({ status: scoutItems.status }).from(scoutItems).where(eq(scoutItems.id, id)).get()?.status ?? 'new';
-      const item = updateItemStatus(id, 'done', user, {
+      const oldStatus = existing.status;
+      const item = resolveItem(id, user, {
         resolutionNote, branchName, mrUrl, evidence,
       });
       logAudit({ userId: user.id, action: 'resolve_item', entityType: 'item', entityId: id, details: { branchName, mrUrl }, ipAddress: getClientIp(c) });
-      dispatchWebhooks(existing.projectId, 'item.status_changed', { item, oldStatus, newStatus: 'done' }).catch(() => {});
-      eventBus.publish({ type: 'item.status_changed', projectId: existing.projectId, payload: { item, oldStatus, newStatus: 'done' } });
+      if (oldStatus !== 'done') {
+        if (existing.assigneeId !== user.id) {
+          dispatchWebhooks(existing.projectId, 'item.assigned', { item, assignee: { id: user.id, name: user.name, email: user.email } }).catch(() => {});
+          eventBus.publish({ type: 'item.assigned', projectId: existing.projectId, payload: { item } });
+        }
+        dispatchWebhooks(existing.projectId, 'item.status_changed', { item, oldStatus, newStatus: 'done' }).catch(() => {});
+        eventBus.publish({ type: 'item.status_changed', projectId: existing.projectId, payload: { item, oldStatus, newStatus: 'done' } });
+      }
       return c.json({ data: item });
     })
 

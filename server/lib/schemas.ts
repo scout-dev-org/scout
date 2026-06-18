@@ -37,30 +37,35 @@ const base64Schema = (maxLength: number) => z.string()
     message: 'Must be valid base64',
   });
 
+const nullableOptional = <T extends z.ZodTypeAny>(schema: T) => z.preprocess(
+  (value) => value === null ? undefined : value,
+  schema.optional(),
+);
+
 export const itemEvidenceSchema = z.object({
   kind: z.enum(ITEM_EVIDENCE_KINDS).default('handoff'),
-  result: z.enum(ITEM_EVIDENCE_RESULTS).optional(),
-  level: z.enum(ITEM_EVIDENCE_LEVELS).optional(),
-  coverage: z.enum(ITEM_EVIDENCE_COVERAGES).optional(),
+  result: nullableOptional(z.enum(ITEM_EVIDENCE_RESULTS)),
+  level: nullableOptional(z.enum(ITEM_EVIDENCE_LEVELS)),
+  coverage: nullableOptional(z.enum(ITEM_EVIDENCE_COVERAGES)),
   environment: z.string().min(1).max(100),
-  role: z.string().max(100).optional(),
-  url: z.string().max(1000).optional(),
+  role: nullableOptional(z.string().max(100)),
+  url: nullableOptional(z.string().max(1000)),
   scenario: z.string().min(1).max(2000),
   action: z.string().min(1).max(2000),
   visibleResult: z.string().min(1).max(2000),
-  acceptanceScope: z.string().max(2000).optional(),
-  consoleResult: z.string().max(2000).optional(),
-  networkResult: z.string().max(2000).optional(),
-  apiResult: z.string().max(2000).optional(),
-  dbResult: z.string().max(2000).optional(),
-  fixture: z.string().max(1000).optional(),
-  cleanupResult: z.string().max(2000).optional(),
-  commitSha: z.string().max(100).optional(),
-  deploySha: z.string().max(100).optional(),
-  risks: z.string().max(2000).optional(),
-  uncheckedRisks: z.string().max(2000).optional(),
-  source: z.enum(ITEM_EVIDENCE_SOURCES).optional(),
-  verifiedAt: z.string().datetime().optional(),
+  acceptanceScope: nullableOptional(z.string().max(2000)),
+  consoleResult: nullableOptional(z.string().max(2000)),
+  networkResult: nullableOptional(z.string().max(2000)),
+  apiResult: nullableOptional(z.string().max(2000)),
+  dbResult: nullableOptional(z.string().max(2000)),
+  fixture: nullableOptional(z.string().max(1000)),
+  cleanupResult: nullableOptional(z.string().max(2000)),
+  commitSha: nullableOptional(z.string().max(100)),
+  deploySha: nullableOptional(z.string().max(100)),
+  risks: nullableOptional(z.string().max(2000)),
+  uncheckedRisks: nullableOptional(z.string().max(2000)),
+  source: nullableOptional(z.enum(ITEM_EVIDENCE_SOURCES)),
+  verifiedAt: nullableOptional(z.string().datetime()),
 });
 
 export type ItemEvidenceInput = z.infer<typeof itemEvidenceSchema>;

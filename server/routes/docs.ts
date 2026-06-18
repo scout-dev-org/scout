@@ -33,7 +33,7 @@ const spec = {
     title: 'Scout Bug Tracking API',
     version: '1.0.0',
     description:
-      'Scout — self-hosted bug tracker for AI-assisted product teams. Agent workflows are expected to drive actionable work to the furthest honest status with structured evidence, asking only for hard gates such as missing access, production release, destructive action, external communication, live-money/provider action, secrets exposure, or human acceptance. Все API-эндпоинты используют метод POST с JSON-телом (кроме health, events, docs). Авторизация через Bearer JWT или API Key (`sk_live_...`). OpenAPI path keys are relative to `servers[0].url`: for example `/items/list` becomes `/api/items/list` at runtime. Use the exact method, path, and JSON body fields shown by this OpenAPI document; do not infer REST-style item URLs, query-string item reads, or payload fields from endpoint names. Unknown `/api/*` paths return JSON `API_ENDPOINT_NOT_FOUND` with a docs link and endpoint hint instead of dashboard HTML.',
+      'Scout — self-hosted bug tracker for AI-assisted product teams. Agent workflows are expected to drive actionable work to the furthest honest status with structured evidence, asking only for hard gates such as missing access, production release, destructive action, external communication, live-money/provider action, secrets exposure, or human acceptance. Для AI/operator completion используйте один endpoint `/items/resolve`; он сам доводит активные рабочие статусы до `done` при наличии passing target evidence. Все API-эндпоинты используют метод POST с JSON-телом (кроме health, events, docs). Авторизация через Bearer JWT или API Key (`sk_live_...`). OpenAPI path keys are relative to `servers[0].url`: for example `/items/list` becomes `/api/items/list` at runtime. Use the exact method, path, and JSON body fields shown by this OpenAPI document; do not infer REST-style item URLs, query-string item reads, or payload fields from endpoint names. Unknown `/api/*` paths return JSON `API_ENDPOINT_NOT_FOUND` with a docs link and endpoint hint instead of dashboard HTML.',
     contact: { url: 'https://your-scout.example' },
   },
   servers: [
@@ -808,7 +808,7 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Взять item в работу',
-        description: 'Назначает текущего пользователя исполнителем и переводит статус в in_progress. Требуется project permission `workflow` (admin/owner/manager/developer).',
+        description: 'Назначает текущего пользователя исполнителем и переводит новый item в in_progress, когда агент начинает длительную работу без готового completion evidence. Не используйте `/items/claim` как предварительный шаг перед `/items/resolve`: completion endpoint сам доводит активный item до `done`. Требуется project permission `workflow` (admin/owner/manager/developer).',
         security: AUTH_SECURITY,
         requestBody: {
           required: true,
@@ -832,7 +832,7 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Подготовить item к human acceptance (resolve)',
-        description: 'Переводит item в статус done: implementation/evidence complete, waiting for human acceptance. Для done требуется inline structured evidence в этом запросе: result, level, coverage, environment, scenario, action, visibleResult, and item-specific acceptanceScope. Требуется project permission `workflow` (admin/owner/manager/developer).',
+        description: 'Единственный endpoint для AI/operator completion. Переводит активный item из `new`, `in_progress`, `review` или `changes_requested` в `done` при наличии inline passing target evidence; повторный вызов для уже `done` item идемпотентно обновляет refs/notes/evidence без нового status transition. Для done требуется inline structured evidence в этом запросе: result, level, coverage, environment, scenario, action, visibleResult, and item-specific acceptanceScope. Inline evidence в `/items/resolve` сохраняется как `kind:"verification"`, даже если клиент не указал kind. `verified` и `cancelled` через resolve не меняются. Требуется project permission `workflow` (admin/owner/manager/developer).',
         security: AUTH_SECURITY,
         requestBody: {
           required: true,
@@ -885,7 +885,7 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Обновить статус item',
-        description: 'Универсальный эндпоинт только для инженерных workflow-переходов в `in_progress` или `review`. Используйте `/items/claim` для начала нового item, `/items/resolve` для `done`, `/items/verify` для `verified`, `/items/request-changes` для `changes_requested`, `/items/cancel` для `cancelled` и `/items/reopen` для возврата в `new`. Переход в review требует inline structured evidence в этом запросе, включая `result:"pass"` и `commitSha`. Требуется project permission `workflow` (admin/owner/manager/developer).',
+        description: 'Универсальный эндпоинт только для промежуточных инженерных workflow-переходов в `in_progress` или `review`. Используйте `/items/claim` только для начала длительной работы над новым item, `/items/resolve` как единственный AI/operator completion endpoint для `done`, `/items/verify` для `verified`, `/items/request-changes` для `changes_requested`, `/items/cancel` для `cancelled` и `/items/reopen` для возврата в `new`. Переход в review требует inline structured evidence в этом запросе, включая `result:"pass"` и `commitSha`. Требуется project permission `workflow` (admin/owner/manager/developer).',
         security: AUTH_SECURITY,
         requestBody: {
           required: true,

@@ -10,7 +10,7 @@ Use this skill when an AI coding agent should take Scout work and handle it manu
 
 Scout ships one OpenCode slash command in `.opencode/commands/`: `/scout`. It is a thin entrypoint into `scout-manual-workflow`; keep lifecycle rules in the skill and let the agent infer full active queue, single-item, single-next, needs-review follow-up, changes-requested follow-up, runtime-error follow-up, or done/verified audit scope from arguments and live queue state. Every invocation uses maintainer-level ownership; arguments choose scope, not a weaker behavior profile. With no arguments, `/scout` defaults to full active queue scope and solves every item that can honestly move further.
 
-The workflow is schema-aware: `review` and `done` transitions require structured evidence with `environment`, `result`, `level`, `coverage`, `scenario`, `action`, `visibleResult`, and item-specific `acceptanceScope`. For `review`, put the real commit SHA in evidence; use `mrUrl` only for a real PR/MR URL. `done` means AI/operator work is ready for human acceptance via `/api/items/verify`.
+The workflow is schema-aware: `review` and `done` transitions require structured evidence with `environment`, `result`, `level`, `coverage`, `scenario`, `action`, `visibleResult`, and item-specific `acceptanceScope`. For `review`, put the real commit SHA in evidence and call `/items/update-status`. For AI/operator completion, call only `/items/resolve`; it accepts active `new`, `changes_requested`, `in_progress`, and `review` items with passing target evidence and stores inline evidence as `verification`. Use `mrUrl` only for a real PR/MR URL. `done` means AI/operator work is ready for human acceptance via `/api/items/verify`.
 
 Widget-created items may include `debugContext`, which stores the captured page, navigation, user actions, console warnings/errors, failed/slow network summaries, performance timing, and a compact rrweb `recordingSummary`. The `/scout` workflow should inspect those structured fields before downloading a full rrweb recording; open the dashboard player or parse the recording JSON only when the bug depends on path, timing, navigation, redirects, or missing context.
 
@@ -20,7 +20,7 @@ The command works without arguments and defaults to full active queue scope. Tex
 
 ## Developer linked setup
 
-Installed `/scout` works without a local Scout repository clone when the command, skill, and Scout API credentials (`SCOUT_URL`, `SCOUT_PROJECT_SLUG`, `SCOUT_API_KEY`) are present. The workflow must use live OpenAPI as its only API contract.
+Installed `/scout` works without a local Scout repository clone when the command, skill, and Scout API credentials (`SCOUT_URL`, `SCOUT_PROJECT_SLUG`, `SCOUT_API_KEY`) are present. The workflow must use live OpenAPI as its only API contract and must use `/items/resolve` as the single AI/operator completion endpoint.
 
 When running OpenCode from this repository, no skill installation is required. `.opencode/opencode.json` loads `skills/`, and `.opencode/commands/scout.md` provides `/scout` from the checkout.
 

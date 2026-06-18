@@ -19,6 +19,7 @@ interface DbOrTx {
 }
 
 const DONE_EVIDENCE_LEVEL_SET = new Set<ItemEvidenceInput['level']>(DONE_EVIDENCE_LEVELS);
+const RESOLVABLE_ITEM_STATUSES = new Set<ItemStatus>(['new', 'in_progress', 'review', 'changes_requested', 'done']);
 
 const ITEM_DEDUPE_WINDOW_MS = 10 * 60 * 1000;
 const ITEM_DEDUPE_CANDIDATE_LIMIT = 50;
@@ -430,6 +431,58 @@ export function claimItem(itemId: string, user: User) {
 
     addAutoNote(tx, itemId, user.id, JSON.stringify({ type: 'assignment', userName: user.name }), 'assignment');
     addAutoNote(tx, itemId, user.id, JSON.stringify({ type: 'status_change', from: 'new', to: 'in_progress' }), 'status_change');
+
+    return tx.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get()!;
+  });
+}
+
+type WorkflowCompletionExtra = {
+  branchName?: string;
+  mrUrl?: string;
+  resolutionNote?: string;
+  evidence?: ItemEvidenceInput;
+};
+
+export function resolveItem(itemId: string, user: User, extra?: WorkflowCompletionExtra) {
+  const item = db.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get();
+  if (!item) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
+  if (item.itemType === 'note') {
+    throw new ValidationError('Notes must be converted to tasks before workflow transitions', 'NOTE_REQUIRES_TRIAGE');
+  }
+
+  const currentStatus = item.status as ItemStatus;
+  if (!RESOLVABLE_ITEM_STATUSES.has(currentStatus)) {
+    throw new ValidationError(`Invalid status transition: ${currentStatus} → done`, 'INVALID_STATUS_TRANSITION');
+  }
+
+  if (currentStatus !== 'done' || extra?.evidence) {
+    requireHandoffEvidence(item, 'done', extra?.evidence);
+  }
+
+  return db.transaction((tx) => {
+    const updatedAt = now();
+    const updateData: Record<string, unknown> = { updatedAt };
+
+    if (currentStatus !== 'done') {
+      updateData.status = 'done';
+      updateData.assigneeId = user.id;
+      updateData.resolvedById = user.id;
+      updateData.resolvedAt = updatedAt;
+    }
+
+    if (extra?.branchName !== undefined) updateData.branchName = extra.branchName;
+    if (extra?.mrUrl !== undefined) updateData.mrUrl = extra.mrUrl;
+    if (extra?.resolutionNote !== undefined) updateData.resolutionNote = extra.resolutionNote;
+
+    tx.update(scoutItems).set(updateData).where(eq(scoutItems.id, itemId)).run();
+    if (extra?.evidence) addEvidence(tx, itemId, user.id, { ...extra.evidence, kind: 'verification' });
+
+    if (currentStatus !== 'done') {
+      if (item.assigneeId !== user.id) {
+        addAutoNote(tx, itemId, user.id, JSON.stringify({ type: 'assignment', userName: user.name }), 'assignment');
+      }
+      addAutoNote(tx, itemId, user.id, JSON.stringify({ type: 'status_change', from: currentStatus, to: 'done' }), 'status_change');
+    }
 
     return tx.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get()!;
   });
