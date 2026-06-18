@@ -20,12 +20,12 @@ When this skill is active, OpenCode is the operator of the Scout item lifecycle.
 1. Perform discovery, code changes, verification, commits, safe non-production pushes/deploys, Scout notes, evidence records, and status updates yourself when access exists.
 2. Default to action, not clarification. Ask the user only after exhausting toolable discovery and only for hard gates: missing access, destructive approval, production release, external communication, live-money/provider action, secrets exposure, human acceptance, or a product decision with incompatible outcomes. Do not ask for routine status, verification, push, deploy, batching, or handoff choices that this skill defines.
 3. Before every Scout status change, evaluate the status preconditions in `Status Transition Algorithm`. If a precondition is false, do not change the status; add a concise blocker or progress note instead.
-4. When moving to `review` or `done`, send the `evidence` object inline in the status API call. Use `/api/items/add-evidence` only for supplemental records that are not a status transition.
+4. When moving to `review` or `done`, send the `evidence` object inline in the status API call. Use `/items/add-evidence` only for supplemental records that are not a status transition.
 5. Treat `note` items as AI-triage input, not as developer chores. Convert actionable notes to `task` yourself when the desired work is inferable from the note, evidence, and product context; otherwise link, cancel, or record one focused blocker question only when no safe inference exists.
 6. Keep user-facing chat short. Durable operational detail belongs in Scout notes and structured evidence, not in chat.
 7. Treat `/scout` as the only Scout execution command. Every invocation uses maintainer-level ownership; arguments and live queue state select only the work scope, not a weaker behavior profile.
 8. For full-queue work, process one cohesive item or shared-root cluster at a time when evidence supports clustering. Status transitions, evidence, and notes still remain item-specific.
-9. Do not use `/api/items/update-status` for `verified` or `changes_requested`. Human acceptance uses `/api/items/verify`; human rejection or explicit audit rejection uses `/api/items/request-changes`.
+9. Do not use `/items/update-status` for `verified` or `changes_requested`. Human acceptance uses `/items/verify`; human rejection or explicit audit rejection uses `/items/request-changes`.
 
 ## Single Command Scope Selection
 
@@ -161,7 +161,7 @@ When handling a `note`:
 If actionable:
 
 1. Add a concise Scout triage note explaining why it is being converted and the inferred acceptance criteria.
-2. Convert it with `/api/items/update` using `itemType: "task"` before claiming or changing workflow status.
+2. Convert it with `/items/update` using `itemType: "task"` before claiming or changing workflow status.
 3. Normalize title/message only if the existing message is unclear and the API/update permission allows it. Preserve the reporter's original signal in the triage note.
 4. Continue through the normal task workflow: claim, implement, verify, add evidence, and hand off.
 
@@ -189,7 +189,7 @@ Human queue tabs are status groups, not separate states:
 | `Accepted` | `verified` |
 | `Archived` | `cancelled` |
 
-1. List active work across relevant statuses: `changes_requested`, `review`, `in_progress`, and `new` when appropriate. Prefer one `/api/items/list` call with `statuses` when Scout supports it; otherwise make separate status calls. Do not filter notes out; if the combined list cannot include all item types, run an additional note-specific list call so useful notes can be converted by AI triage instead of waiting for a developer.
+1. List active work with one `/items/list` call using `statuses:["changes_requested","review","in_progress","new"]`. Do not filter notes out of the returned items; useful notes can be converted by AI triage instead of waiting for a developer.
 2. Sort by severity and urgency first, then age:
    - `critical`: production outage, data loss/corruption, security/privacy issue, broken core workflow.
    - `high`: major user-visible failure, blocked important workflow, strong business impact.
@@ -354,9 +354,9 @@ Rules:
 5. Generic route sweeps, cluster checks, and API smoke can support a transition, but cannot replace item-specific acceptance unless `coverage:"shared_root_cluster"` names exactly how this item is covered.
 6. For shared-root evidence, do not move a related item to `done` unless that item's original acceptance path or a documented equivalent was replayed. A root-cause/API check without the related user journey is at most `review` with explicit `uncheckedRisks`.
 7. Before moving more than three items in one run, build a per-item readiness matrix: item id, original acceptance, evidence level, coverage, result, unchecked risks, and next honest status.
-8. If acceptance cannot be safely checked, create `blocker` evidence or a blocker note and keep the item in the current honest status. Use `/api/items/request-changes` only when explicit audit/review rejection is justified; use `/api/items/reopen` only for an explicit reopen/regression workflow.
-9. When using the API for `review` or `done`, include the `evidence` object in `/api/items/update-status` or `/api/items/resolve`.
-10. Use only Scout schema evidence kinds: `handoff` for handoff/review evidence, `verification` for `/api/items/resolve`, `audit` for audits, and `blocker` for blocked evidence. Do not invent `kind` values such as `acceptance`.
+8. If acceptance cannot be safely checked, create `blocker` evidence or a blocker note and keep the item in the current honest status. Use `/items/request-changes` only when explicit audit/review rejection is justified; use `/items/reopen` only for an explicit reopen/regression workflow.
+9. When using the API for `review` or `done`, include the `evidence` object in `/items/update-status` or `/items/resolve`.
+10. Use only Scout schema evidence kinds: `handoff` for handoff/review evidence, `verification` for `/items/resolve`, `audit` for audits, and `blocker` for blocked evidence. Do not invent `kind` values such as `acceptance`.
 
 ## Compact Regression Matrix
 
@@ -393,7 +393,7 @@ When the user asks to recheck many `done` or `verified` items, treat this as an 
 3. Do not treat rejection as undoing the whole completion batch. Passed items stay `done` or `verified`; only confirmed `fail` or unconfirmable `blocked` items move out through `changes_requested`.
 4. Do not claim every item received full manual acceptance coverage unless each original scenario was actually replayed or a documented equivalent was executed.
 5. For unsafe/destructive flows without disposable fixtures, mark only that item `blocked`; add the exact missing fixture/access/safety condition and leave it unaccepted unless explicit audit policy requires `changes_requested`.
-6. For confirmed failures, use `/api/items/request-changes` with expected/actual behavior, URL, role, reproduction steps, and console/network/API evidence. Add a separate Russian QA note only when the structured request-changes note is not enough.
+6. For confirmed failures, use `/items/request-changes` with expected/actual behavior, URL, role, reproduction steps, and console/network/API evidence. Add a separate Russian QA note only when the structured request-changes note is not enough.
 7. Move `changes_requested` items to `in_progress` only when the agent is immediately taking ownership. Do not use `update-status` for `done → in_progress`, `verified → in_progress`, `done → changes_requested`, or `verified → changes_requested`.
 8. Use small batches with resume state for Scout notes/status updates. After each batch, verify counts from Scout rather than assuming all API calls succeeded.
 9. The final audit report must include total audited, pass, fail, blocked, moved to `changes_requested`, reopened only when applicable, new items created, and any items not fully covered with the reason.
@@ -449,7 +449,7 @@ When updating Scout status after a local commit:
 1. Fill `mrUrl` only with a real PR/MR URL.
 2. If there is only a local commit SHA and no PR/MR, do not pass the SHA in `mrUrl`.
 3. Put the commit SHA in the Scout note, then call `update-status` with `branchName` and without `mrUrl` only when making a real valid status transition, normally `in_progress` -> `review`.
-4. Do not call `update-status` just to rewrite `branchName`, `mrUrl`, or evidence on an item that is already in the intended status. Use `/api/items/add-note` and `/api/items/add-evidence` for supplemental handoff details, and record that the visible branch field could not be changed without status churn.
+4. Do not call `update-status` just to rewrite `branchName`, `mrUrl`, or evidence on an item that is already in the intended status. Use `/items/add-note` and `/items/add-evidence` for supplemental handoff details, and record that the visible branch field could not be changed without status churn.
 
 ## Batch Work And Staging
 
@@ -518,7 +518,7 @@ Default note structure:
 
 Use technical terms only when they help review or reproduce the issue. Explain consequence, not line-by-line implementation. Put raw logs, long matrices, or detailed command output in an artifact or PR comment only when Scout needs that level of evidence.
 
-When adding long Scout notes through the API, build JSON with a safe encoder such as `jq -n --arg id "<CHANGE-ME-item-id>" --arg content "$NOTE" '{id:$id,content:$content}'` and pass that payload to `curl`. Avoid hand-escaped shell JSON for multi-line notes, backticks, quotes, or non-ASCII text.
+When adding long Scout notes through the API, build JSON with the same script JSON encoder used by the Scout API helper. Avoid hand-escaped shell JSON for multi-line notes, backticks, quotes, or non-ASCII text.
 
 Minimum useful Scout updates:
 
@@ -570,28 +570,28 @@ Use the `Queue Triage` table for UI queue-to-status mapping. Do not invent queue
 
 Status transition algorithm for OpenCode:
 
-1. `new` -> `in_progress`: If the item is actionable and the agent is starting now, call `/api/items/claim`. Add or keep a short start note. Do not claim items that are unclear, blocked before ownership, or owned by someone else unless instructed.
-2. `changes_requested` -> `in_progress`: If the returned work is actionable and the agent is taking ownership now, add a short note naming the rejection being addressed and call `/api/items/update-status` with `status:"in_progress"`. Do not use `/api/items/claim` for this status.
-3. `in_progress` -> `review`: Use only after the fix is implemented, final local checks passed, browser/runtime checks passed when relevant, final diff was reviewed, a commit exists, and staging deployment/verification cannot be completed safely in the same run. Add inline `evidence` with schema-required fields (`environment`, `scenario`, `action`, `visibleResult`), `result:"pass"`, an appropriate `level`, `coverage:"item"` or justified cluster coverage, item-specific `acceptanceScope`, and `commitSha` in `/api/items/update-status` with `status:"review"`. Include top-level `mrUrl` only when a real PR/MR URL exists, then add the Russian handoff or staging blocker note if not already added.
-4. `review` -> `done`: Use only after canonical deploy or accepted target-environment verification passed. Add inline `evidence` in `/api/items/resolve` with schema-required fields (`environment`, `scenario`, `action`, `visibleResult`), `result:"pass"`, `level:"staging_acceptance"`, `"production_acceptance"`, `"user_acceptance"`, or explicit `"local_acceptance"`, item-specific `acceptanceScope`, URL when applicable, deploy/commit SHA when relevant, and the observed result. Add a Russian completion note with the target environment, remaining risks, and that human acceptance is next.
+1. `new` -> `in_progress`: If the item is actionable and the agent is starting now, call `/items/claim`. Add or keep a short start note. Do not claim items that are unclear, blocked before ownership, or owned by someone else unless instructed.
+2. `changes_requested` -> `in_progress`: If the returned work is actionable and the agent is taking ownership now, add a short note naming the rejection being addressed and call `/items/update-status` with `status:"in_progress"`. Do not use `/items/claim` for this status.
+3. `in_progress` -> `review`: Use only after the fix is implemented, final local checks passed, browser/runtime checks passed when relevant, final diff was reviewed, a commit exists, and staging deployment/verification cannot be completed safely in the same run. Add inline `evidence` with schema-required fields (`environment`, `scenario`, `action`, `visibleResult`), `result:"pass"`, an appropriate `level`, `coverage:"item"` or justified cluster coverage, item-specific `acceptanceScope`, and `commitSha` in `/items/update-status` with `status:"review"`. Include top-level `mrUrl` only when a real PR/MR URL exists, then add the Russian handoff or staging blocker note if not already added.
+4. `review` -> `done`: Use only after canonical deploy or accepted target-environment verification passed. Add inline `evidence` in `/items/resolve` with schema-required fields (`environment`, `scenario`, `action`, `visibleResult`), `result:"pass"`, `level:"staging_acceptance"`, `"production_acceptance"`, `"user_acceptance"`, or explicit `"local_acceptance"`, item-specific `acceptanceScope`, URL when applicable, deploy/commit SHA when relevant, and the observed result. Add a Russian completion note with the target environment, remaining risks, and that human acceptance is next.
 5. `in_progress` -> `done`: Use only for non-deploy work, explicit user acceptance, or work already pushed, deployed, and verified on the target environment in the same run. The same `done` evidence requirements apply. If local-only verification is the strongest evidence, move to `review`, not `done`.
-6. `review` -> `in_progress`: If staging/user/reviewer verification fails or the handoff/verification evidence is incomplete and the agent will fix it now, add a failure note, then call `/api/items/update-status` with `status:"in_progress"`.
-7. `done`/`verified` -> `changes_requested`: Use only in explicit audit/review scope or when a human asks to reject accepted work. Call `/api/items/request-changes` with concrete `summary`, `expected`, and `actual`; add `steps` and `url` when available. Do not use `/api/items/update-status`.
-8. `done`/`verified`/`cancelled` -> `new`/`in_progress`: Use `/api/items/reopen` only for explicit reopen/audit/regression workflows where `changes_requested` is not the right model. Pass `status:"in_progress"` only when the agent is immediately taking ownership, otherwise omit `status` to reopen as `new`.
-9. Any status -> `cancelled`: Use only when the item should not be implemented. Add a Russian note explaining duplicate/invalid/out-of-scope/not-reproducible rationale and link related items when relevant, then call `/api/items/cancel` if the API transition is valid.
+6. `review` -> `in_progress`: If staging/user/reviewer verification fails or the handoff/verification evidence is incomplete and the agent will fix it now, add a failure note, then call `/items/update-status` with `status:"in_progress"`.
+7. `done`/`verified` -> `changes_requested`: Use only in explicit audit/review scope or when a human asks to reject accepted work. Call `/items/request-changes` with concrete `summary`, `expected`, and `actual`; add `steps` and `url` when available. Do not use `/items/update-status`.
+8. `done`/`verified`/`cancelled` -> `new`/`in_progress`: Use `/items/reopen` only for explicit reopen/audit/regression workflows where `changes_requested` is not the right model. Pass `status:"in_progress"` only when the agent is immediately taking ownership, otherwise omit `status` to reopen as `new`.
+9. Any status -> `cancelled`: Use only when the item should not be implemented. Add a Russian note explaining duplicate/invalid/out-of-scope/not-reproducible rationale and link related items when relevant, then call `/items/cancel` if the API transition is valid.
 
 Hard rules for the agent:
 
 - Never mark `review` or `done` because code was edited, tests passed once, or deploy succeeded by itself.
 - Never mark `done` from local evidence alone unless the task has no deployed/user-visible runtime or the user explicitly accepted the result.
-- Never mark `verified` as normal AI completion. Use `/api/items/verify` only after explicit human acceptance or an explicit user instruction to perform that acceptance action.
+- Never mark `verified` as normal AI completion. Use `/items/verify` only after explicit human acceptance or an explicit user instruction to perform that acceptance action.
 - Do not stop at `review` solely out of habit when a safe canonical staging deploy and item-specific staging acceptance can be completed now.
 - Never move an item to `review` or `done` without structured evidence that names schema-required fields (`environment`, `scenario`, `action`, `visibleResult`) plus `result`, `level`, `coverage`, and item-specific `acceptanceScope`. Prefer passing `evidence` in the same status API call.
-- Never create `changes_requested` through `/api/items/update-status`. Use `/api/items/request-changes` with expected/actual context when explicit review/audit rejection is allowed.
+- Never create `changes_requested` through `/items/update-status`. Use `/items/request-changes` with expected/actual context when explicit review/audit rejection is allowed.
 - If a required precondition is missing, keep the item in the current honest status and add a blocker/progress note. Do not invent evidence to satisfy the gate.
 - If multiple items are covered by one fix, transition each item independently only after its own acceptance condition and evidence are satisfied.
 
-Do not add `blocked` as a Scout workflow status. In audits, `blocked` is a QA/ledger result meaning acceptance could not be safely confirmed; record the blocker in a note and keep the item in the current honest status or use `/api/items/request-changes` when explicit audit rejection is justified.
+Do not add `blocked` as a Scout workflow status. In audits, `blocked` is a QA/ledger result meaning acceptance could not be safely confirmed; record the blocker in a note and keep the item in the current honest status or use `/items/request-changes` when explicit audit rejection is justified.
 
 When reporting broad audit counts, separate Scout workflow statuses (`new`, `in_progress`, `review`, `done`, `changes_requested`, `verified`, `cancelled`) from QA result statuses (`pass`, `fail`, `blocked`). Do not mix these into one status list.
 
@@ -642,40 +642,53 @@ Final user response must be short and evidence-based:
 
 ## Scout API Use Patterns
 
-Authenticate with `Authorization: Bearer $SCOUT_API_KEY`. Use the `Configuration` prefix above only inside the command process. Live OpenAPI is the only source for endpoint method, runtime URL, request body, and response shape.
+Authenticate with `Authorization: Bearer $SCOUT_API_KEY`. Do not also send non-documented auth headers. Use the `Configuration` prefix above only inside the command process. Live OpenAPI is the only source for endpoint method, runtime URL, request body, and response shape.
 
 Build Scout API URLs exactly once from OpenAPI before any project or item call. OpenAPI path keys are relative to `servers[0].url`; the current server path is normally `/api`, so the documented path `/projects/list` becomes runtime URL `$SCOUT_URL/api/projects/list`. Do not first try `$SCOUT_URL/projects/list` and then retry with `/api`; that 404 is avoidable.
 
-Recommended Node helper shape:
+Canonical Node helper shape:
 
 ```js
 const scoutBase = process.env.SCOUT_URL.replace(/\/$/, '');
-const spec = await (await fetch(`${scoutBase}/api/docs/openapi.json`, { headers })).json();
+const headers = {
+  Accept: 'application/json',
+  'Content-Type': 'application/json',
+  Authorization: `Bearer ${process.env.SCOUT_API_KEY}`,
+};
+
+const specRes = await fetch(`${scoutBase}/api/docs/openapi.json`, { headers });
+if (!specRes.ok) throw new Error(`openapi ${specRes.status}`);
+const spec = await specRes.json();
 const apiBasePath = (spec.servers?.[0]?.url || '/api').replace(/\/$/, '');
 const apiUrl = (openApiPath) => `${scoutBase}${apiBasePath}${openApiPath.startsWith('/') ? openApiPath : `/${openApiPath}`}`;
 
 async function post(openApiPath, body) {
   const res = await fetch(apiUrl(openApiPath), { method: 'POST', headers, body: JSON.stringify(body) });
-  // handle .data / errors according to this section
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${openApiPath} ${res.status}: ${text.slice(0, 500)}`);
+  return JSON.parse(text).data;
 }
 ```
 
 Pass documented OpenAPI paths such as `/projects/list`, `/items/list`, and `/items/get` into this helper. Do not pass runtime paths such as `/api/projects/list` into a helper that already prefixes `servers[0].url`.
 
+Keep OpenAPI discovery quiet and deterministic. Do not print full schemas, full item payloads, full queue dumps, or long path lists to chat. If there is a contract mismatch, print only the failing documented path, status code, and a short error body.
+
 Rules:
 
 - At the start of every Scout run, fetch `$SCOUT_URL/api/docs/openapi.json`, compute the API base from `servers[0].url`, and reuse that helper for all calls.
+- OpenAPI path keys do not include `/api`. When filtering path keys, match documented prefixes such as `/items/`, `/projects/`, `/integrations/errors/`, and `/api-keys/`; never filter for `/api/items` or `/api/projects`.
 - Use the method and JSON body shown by live OpenAPI. Do not infer REST-style paths, query-string item lookups, or payload fields from endpoint names.
-- Read successful JSON payloads from `.data`. For lists, read `.data.items` and `.data.pagination`.
+- Read successful JSON payloads from `.data`. For lists, read `.data.items` and `.data.pagination`. Do not write fallback parsers for legacy shapes such as top-level `.items`, `.item`, or `.itemsList`.
 - If a Scout API call returns `text/html`, a dashboard page, or `API_ENDPOINT_NOT_FOUND`, stop. Re-read live OpenAPI and retry only with the documented endpoint/method/body.
 - Resolve `SCOUT_PROJECT_SLUG` once at the start of the run through the documented `/projects/list` endpoint: find a project whose `slug` equals `SCOUT_PROJECT_SLUG`, then use that project's `id` as the internal `projectId` for item listing and counting. If no listed project matches the slug, stop with a precise missing-access or wrong-slug blocker.
 - Fetch the full item with the documented `/items/get` endpoint before code edits or status changes.
-- Use `/api/items/claim`, `/api/items/add-note`, `/api/items/link`, `/api/items/add-evidence`, `/api/items/update-status`, `/api/items/resolve`, `/api/items/request-changes`, and `/api/items/reopen` only when the status/evidence rules above allow that action. `/api/items/verify` is for explicit human acceptance, not normal AI completion.
+- Use `/items/claim`, `/items/add-note`, `/items/link`, `/items/add-evidence`, `/items/update-status`, `/items/resolve`, `/items/request-changes`, and `/items/reopen` only when the status/evidence rules above allow that action. `/items/verify` is for explicit human acceptance, not normal AI completion.
 - Scout API schemas use optional string fields, not nullable string fields. Omit absent optional strings instead of sending `null`, especially refs, URL/result fields, risks, branch, PR/MR, commit and deploy fields.
-- Use one atomic `/api/items/update-status` or `/api/items/resolve` call with an inline `evidence` object when moving to `review` or `done`.
-- For `/api/items/resolve`, use evidence `kind:"verification"`.
+- Use one atomic `/items/update-status` or `/items/resolve` call with an inline `evidence` object when moving to `review` or `done`.
+- For `/items/resolve`, use evidence `kind:"verification"`.
 - Include `mrUrl` only as a real PR/MR URL. Put local commit SHAs in Scout notes/evidence, not in `mrUrl`.
-- Build payloads with `jq -n`, delete empty/null fields before sending, and keep secrets/cookies/raw private payloads out of notes and evidence.
+- Build payloads with the same script JSON encoder used for the API helper, delete empty/null fields before sending, and keep secrets/cookies/raw private payloads out of notes and evidence.
 
 ## Boundaries
 
