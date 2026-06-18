@@ -405,9 +405,10 @@ For batch work, audits, broad sweeps, or any run that must survive session compa
 1. Use a durable path outside the repo, normally `~/.local/state/opencode/scout-ledgers/<project-or-repo>-<UTC>.jsonl`.
 2. Do not use OS temp paths such as `/tmp`, `/var/folders/...`, browser download folders, or tracked repository paths for ledgers.
 3. Store item ids, statuses, decisions, evidence summaries, commit/deploy refs, and next actions. Do not store secrets, cookies, full tokens, raw private payloads, or huge logs.
-4. Update the ledger after each item or small batch, before moving on to unrelated work.
-5. Ledger rows are operational artifacts, not source edits. Use a safe JSON encoder and append outside the repo; avoid spending time forcing ledger updates through code-edit workflows.
-6. If a PTY session, deploy log, browser sweep, or long command produced evidence, capture the command, exit status, and relevant result summary in Scout notes, the ledger, or the final report before cleaning up the session or deleting logs.
+4. Create the exact ledger directory directly, for example with `mkdir -p` or `fs.mkdirSync(..., { recursive: true })`. Do not list broad state or credential directories such as `~/.local/state/opencode`; file names there may reveal token or secret names.
+5. Update the ledger after each item or small batch, before moving on to unrelated work.
+6. Ledger rows are operational artifacts, not source edits. Use a safe JSON encoder and append outside the repo; avoid spending time forcing ledger updates through code-edit workflows.
+7. If a PTY session, deploy log, browser sweep, or long command produced evidence, capture the command, exit status, and relevant result summary in Scout notes, the ledger, or the final report before cleaning up the session or deleting logs.
 
 ## Implementation
 
@@ -643,9 +644,27 @@ Final user response must be short and evidence-based:
 
 Authenticate with `Authorization: Bearer $SCOUT_API_KEY`. Use the `Configuration` prefix above only inside the command process. Live OpenAPI is the only source for endpoint method, runtime URL, request body, and response shape.
 
+Build Scout API URLs exactly once from OpenAPI before any project or item call. OpenAPI path keys are relative to `servers[0].url`; the current server path is normally `/api`, so the documented path `/projects/list` becomes runtime URL `$SCOUT_URL/api/projects/list`. Do not first try `$SCOUT_URL/projects/list` and then retry with `/api`; that 404 is avoidable.
+
+Recommended Node helper shape:
+
+```js
+const scoutBase = process.env.SCOUT_URL.replace(/\/$/, '');
+const spec = await (await fetch(`${scoutBase}/api/docs/openapi.json`, { headers })).json();
+const apiBasePath = (spec.servers?.[0]?.url || '/api').replace(/\/$/, '');
+const apiUrl = (openApiPath) => `${scoutBase}${apiBasePath}${openApiPath.startsWith('/') ? openApiPath : `/${openApiPath}`}`;
+
+async function post(openApiPath, body) {
+  const res = await fetch(apiUrl(openApiPath), { method: 'POST', headers, body: JSON.stringify(body) });
+  // handle .data / errors according to this section
+}
+```
+
+Pass documented OpenAPI paths such as `/projects/list`, `/items/list`, and `/items/get` into this helper. Do not pass runtime paths such as `/api/projects/list` into a helper that already prefixes `servers[0].url`.
+
 Rules:
 
-- At the start of every Scout run, fetch `$SCOUT_URL/api/docs/openapi.json` and follow it exactly. OpenAPI path keys are relative to `servers[0].url`; build runtime URLs with `$SCOUT_URL` plus `servers[0].url` plus the documented path.
+- At the start of every Scout run, fetch `$SCOUT_URL/api/docs/openapi.json`, compute the API base from `servers[0].url`, and reuse that helper for all calls.
 - Use the method and JSON body shown by live OpenAPI. Do not infer REST-style paths, query-string item lookups, or payload fields from endpoint names.
 - Read successful JSON payloads from `.data`. For lists, read `.data.items` and `.data.pagination`.
 - If a Scout API call returns `text/html`, a dashboard page, or `API_ENDPOINT_NOT_FOUND`, stop. Re-read live OpenAPI and retry only with the documented endpoint/method/body.
