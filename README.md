@@ -178,7 +178,7 @@ Scout developers who want live command or skill edits outside this checkout shou
 
 The live API contract at `/api/docs/openapi.json` is the single source of truth for clients, installed agent skills, and operator workflows. Use it for every endpoint method, URL, request body, and response shape. Do not infer REST-style item URLs or payload fields from endpoint names.
 
-For AI/operator completion, `/api/items/resolve` is the single endpoint: it accepts active `new`, `changes_requested`, `in_progress`, and `review` items with inline passing target evidence, stores that evidence as `verification`, and moves the item to `done` for human acceptance. Do not pre-call `/items/claim` or `/items/update-status` only to make completion legal. Optional evidence fields may be omitted; nullable optional evidence fields in the OpenAPI contract are accepted by the server.
+For AI/operator completion, `/api/items/resolve` is the single endpoint: it accepts active `new`, `changes_requested`, `in_progress`, and `review` items with inline passing target evidence, stores that evidence as `verification`, and moves the item to `done` for human acceptance. Do not pre-call `/items/claim` or `/items/update-status` only to make completion legal. Derive optional and nullable evidence fields from the live OpenAPI contract at runtime.
 
 Auth via `Authorization: Bearer <jwt|api-key>`.
 

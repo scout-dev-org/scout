@@ -421,6 +421,8 @@ For batch work, audits, broad sweeps, or any run that must survive session compa
 6. Ledger rows are operational artifacts, not source edits. Use a safe JSON encoder and append outside the repo; avoid spending time forcing ledger updates through code-edit workflows.
 7. If a PTY session, deploy log, browser sweep, or long command produced evidence, capture the command, exit status, and relevant result summary in Scout notes, the ledger, or the final report before cleaning up the session or deleting logs.
 
+If a Scout run must continue in a new OpenCode session, keep the continuation prompt short and discovery-first: project path, objective, required workflow, and the live Scout/API/repo commands the next session must refresh. Do not paste long transcripts, stale queue counts, or large ID lists; if an item id is included, mark it as a snapshot and instruct the next session to re-check the live queue before acting.
+
 ## Implementation
 
 1. Work in the current local repository unless the user explicitly points elsewhere.
@@ -697,7 +699,7 @@ Rules:
 - Fetch the full item with the documented `/items/get` endpoint before code edits or status changes.
 - Use `/items/claim`, `/items/add-note`, `/items/link`, `/items/add-evidence`, `/items/update-status`, `/items/resolve`, `/items/request-changes`, and `/items/reopen` only when the status/evidence rules above allow that action. `/items/verify` is for explicit human acceptance, not normal AI completion.
 - For AI/operator completion, use `/items/resolve` as the only endpoint. Do not call `/items/claim` or `/items/update-status` first for `new`, `changes_requested`, `in_progress`, or `review` items that already have passing completion evidence.
-- Request schemas accept optional evidence strings as omitted fields; current Scout also accepts `null` for optional evidence fields and stores them as empty DB nulls. Prefer omitting absent optional strings in generated payloads, especially refs, URL/result fields, risks, branch, PR/MR, commit and deploy fields.
+- Follow live OpenAPI nullable/optional semantics for request schemas. Prefer omitting absent optional strings in generated payloads unless the current schema explicitly requires `null`, especially refs, URL/result fields, risks, branch, PR/MR, commit, and deploy fields.
 - Use one atomic `/items/update-status` call with an inline `evidence` object when moving to `review`, and one atomic `/items/resolve` call with inline `evidence` when moving to `done`.
 - For `/items/resolve`, use evidence `kind:"verification"`. The server stores inline resolve evidence as `verification` even if a legacy client omitted or defaulted the kind.
 - Include `mrUrl` only as a real PR/MR URL. Put local commit SHAs in Scout notes/evidence, not in `mrUrl`.

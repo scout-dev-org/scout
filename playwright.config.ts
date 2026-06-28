@@ -15,13 +15,11 @@ export default defineConfig({
     { name: 'firefox', use: { browserName: 'firefox' } },
     { name: 'webkit', use: { browserName: 'webkit' } },
   ],
-  // Server must be started manually before running E2E:
-  //   pnpm dev:all
-  // Or use webServer config to auto-start:
+  // E2E covers API, dashboard, demo, and widget assets.
   webServer: {
-    command: 'pnpm dev',
+    command: 'pnpm dev:all',
     port: 10009,
-    timeout: 15_000,
+    timeout: 30_000,
     reuseExistingServer: true,
   },
 });
