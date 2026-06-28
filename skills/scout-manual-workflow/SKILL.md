@@ -26,6 +26,8 @@ When this skill is active, OpenCode is the operator of the Scout item lifecycle.
 7. Treat `/scout` as the only Scout execution command. Every invocation uses maintainer-level ownership; arguments and live queue state select only the work scope, not a weaker behavior profile.
 8. For full-queue work, process one cohesive item or shared-root cluster at a time when evidence supports clustering. Status transitions, evidence, and notes still remain item-specific.
 9. Do not use `/items/update-status` for `verified` or `changes_requested`. Human acceptance uses `/items/verify`; human rejection or explicit audit rejection uses `/items/request-changes`.
+10. Do not delegate `/scout` work through the `Task` tool, `@explore`, or other subagents. The command session must remain the single owner of queue triage, ledgers, code changes, verification, and Scout status updates; do independent investigation sequentially with direct tools unless the user explicitly asks for parallel subagents.
+11. Do not leave a Scout item blocked because staging/local lacks seed content, multiple records, uploaded files, user state, or other ordinary acceptance fixtures when you have safe non-production access to create scoped disposable data through UI, API, CLI, DB, or admin tools. Create the fixture, verify the item, then cleanup/restore or record why the fixture must remain.
 
 ## Single Command Scope Selection
 
@@ -85,6 +87,7 @@ Handle routine engineering decisions without asking the user:
 - create evidence-backed Scout links and notes;
 - choose the minimal code path, tests, runtime checks, and browser checks;
 - create focused commits and push non-production-safe branches when repo workflow allows;
+- create scoped disposable non-production fixtures, uploads, admin content, test users, or test records needed for acceptance verification, then cleanup/restore when safe;
 - push all existing local ahead commits on the same safe branch when the branch must be pushed as a unit for handoff or staging;
 - deploy or close items only when the repository and Scout workflow explicitly allow it and the required evidence exists;
 - update Scout status when the Definition of Done supports it.
@@ -96,6 +99,12 @@ Ask the user only for real blockers:
 - product decision with incompatible requirements;
 - external dependency outside the available repo/services;
 - production release/deploy, protected/default branch update, release branch fast-forward, or human acceptance decision.
+
+## Unattended And Scheduled Runs
+
+When the Scout scope is explicitly unattended, scheduled, or full-queue and the repo policy authorizes non-production push/deploy, treat routine repository drift as work to reconcile, not as a reason to stop. This includes stale tracking branches, missing local tracking branches, safe non-production branch ahead/behind state, dirty root submodule pointers, and a child repository being on the wrong local branch.
+
+Fetch and inspect first, preserve unrelated local changes, compare content and remote refs when branch SHAs can differ because of merges, then fast-forward/merge along the repo-local non-production branch order and push only when branch safety is clear. Commit root pointer updates when the repo workflow permits it. Exclude repositories that repo-local policy marks as local-only or outside the branch flow from branch-equality gates. Stop only for real blockers: branch-policy conflict, dirty source changes that cannot be safely isolated, protected/production targets, destructive action, missing access, or an unresolved product decision.
 
 ## Configuration
 
@@ -255,6 +264,7 @@ When `/scout` uses full active queue scope, optimize for correct throughput, not
 4. Avoid status noise: do not claim every candidate just because it was listed. Claim an item when implementation or active verification starts.
 5. Keep the ledger as the durable progress source for batch state. Do not paste full queue snapshots or every API response into chat or Scout notes.
 6. Continue until every active item in scope has an honest final state for this run: `done`, `review`, `changes_requested` with an exact blocker/failure, `in_progress` with an exact blocker/failure, `cancelled`, or non-actionable `note` with one focused question/blocker.
+7. Before recording a blocker caused by missing verification data, missing content, absent fixtures, or an unobservable state, first try the safe fixture path: create scoped non-production data/content, run the acceptance check, and cleanup/restore or document the fixture lifecycle. Treat blocker as valid only when the fixture path is unsafe, unavailable, destructive, production-only, or requires a product decision.
 
 ## Triage
 
@@ -590,7 +600,7 @@ Hard rules for the agent:
 - Never move an item to `review` or `done` without structured evidence that names schema-required fields (`environment`, `scenario`, `action`, `visibleResult`) plus `result`, `level`, `coverage`, and item-specific `acceptanceScope`. Prefer passing `evidence` in the same status API call.
 - Never use `/items/claim` or `/items/update-status` as a preparatory transition for completion. If passing completion evidence exists, call `/items/resolve` once and let the server handle `new`, `changes_requested`, `in_progress`, or `review`.
 - Never create `changes_requested` through `/items/update-status`. Use `/items/request-changes` with expected/actual context when explicit review/audit rejection is allowed.
-- If a required precondition is missing, keep the item in the current honest status and add a blocker/progress note. Do not invent evidence to satisfy the gate.
+- If a required precondition is missing, satisfy it yourself when a safe non-production fixture, upload, admin/API setup, or environment adjustment can create the acceptance path. Only keep the item in the current honest status with a blocker/progress note when the missing precondition is a hard gate; do not invent evidence to satisfy the gate.
 - If multiple items are covered by one fix, transition each item independently only after its own acceptance condition and evidence are satisfied.
 
 Do not add `blocked` as a Scout workflow status. In audits, `blocked` is a QA/ledger result meaning acceptance could not be safely confirmed; record the blocker in a note and keep the item in the current honest status or use `/items/request-changes` when explicit audit rejection is justified.
@@ -622,7 +632,7 @@ Before handoff:
 
 Do not present the item as complete until all of these are true:
 
-1. The reported problem or requested improvement is addressed end-to-end, or a precise blocker/question is recorded in Scout.
+1. The reported problem or requested improvement is addressed end-to-end, or a precise hard blocker/question is recorded in Scout after safe fixture/content/environment remedies were attempted or ruled out.
 2. The final diff was reviewed for unrelated changes, secrets, debug code, broad rewrites, and stale TODOs.
 3. Fresh verification evidence exists after the final edit: commands, browser checks, API checks, or a documented reason why a check cannot run.
 4. Frontend, dashboard, widget, or other user-visible changes have browser verification of the reported user journey or acceptance path when feasible; API/curl-only evidence is insufficient for UI bugs.
@@ -699,6 +709,6 @@ Rules:
 - Do not run polling or background automation in this manual workflow.
 - Do not mutate unrelated Scout items.
 - Do not delete user/reporter Scout data, screenshots, recordings, production volumes, or business data.
-- Remove agent-created disposable verification artifacts before completion when they were created only to test the workflow: record the exact ids and evidence first, then delete the narrowest synthetic Scout item/error group/bridge job or fixture through the safest available path.
+- Remove agent-created disposable verification artifacts before completion when they were created only to test the workflow: record the exact ids and evidence first, then delete/deactivate the narrowest synthetic Scout item/error group/bridge job/content fixture through the safest available path. If cleanup would destroy required acceptance evidence or is less safe than leaving a clearly scoped non-production fixture, record why it remains and how to identify it later.
 - Do not use destructive Git or deploy commands unless explicitly requested and safe.
 - Do not bypass repo safety rules, checks, or browser verification requirements.
