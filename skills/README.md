@@ -1,115 +1,44 @@
 # Scout Skills
 
-This directory contains the canonical agent skills for working with Scout. Skills describe operator behavior. The only API contract is live OpenAPI at `$SCOUT_URL/api/docs/openapi.json`.
+## Source Of Truth
 
-## `scout-manual-workflow`
+`skills/scout-manual-workflow/` in this repository is the only authored owner of the Scout operator skill. Its `SKILL.md` contains the compact execution contract; `references/` contains agent-specific workflows that the skill loads only for matching scopes.
 
-Use this skill when an AI coding agent should take Scout work and handle it manually like a professional engineer: triage, reproduce, diagnose, inspect linked runtime error context and browser `debugContext`/`recordingSummary` when present, use rrweb session replay as DOM/event evidence when needed, fix, verify, commit/push/deploy through safe canonical non-production paths when allowed, update Scout notes/statuses, and handle related or duplicate items without asking for routine workflow choices.
+The live contract at `$SCOUT_URL/api/docs/openapi.json` is the only source for API paths, methods, request fields, allowed values, and responses. Do not copy schemas, enum catalogs, or payload recipes into the skill, references, commands, or docs.
 
-## OpenCode Commands
+## Active Projections
 
-Scout ships one OpenCode slash command in `.opencode/commands/`: `/scout`. It is a thin entrypoint into `scout-manual-workflow`; keep lifecycle rules in the skill and let the agent infer full active queue, single-item, single-next, needs-review follow-up, changes-requested follow-up, runtime-error follow-up, or done/verified audit scope from arguments and live queue state. Every invocation uses maintainer-level ownership; arguments choose scope, not a weaker behavior profile. With no arguments, `/scout` defaults to full active queue scope and solves every item that can honestly move further.
+| Surface | Source | Projection/update path |
+|---|---|---|
+| Project skill | `skills/scout-manual-workflow/` | `.opencode/opencode.json` loads the repo `skills` path directly |
+| Project command | `.opencode/commands/scout.md` | Loaded directly from this checkout |
+| Developer global skill | Repo skill directory | `~/.config/opencode/skills/scout-manual-workflow` is a symlink to the repo owner |
+| Global command | Repo command file | `scripts/install-opencode-commands.sh` copies it one way into the configured global command directory |
 
-The workflow is schema-aware: `review` and `done` transitions require structured evidence whose exact required fields come from live OpenAPI; the skill lists the operator checklist, not a copied schema. For `review`, put the real commit SHA in evidence and call `/items/update-status`. For AI/operator completion, call only `/items/resolve`; it accepts active `new`, `changes_requested`, `in_progress`, and `review` items with passing target evidence and stores inline evidence as `verification`. Use `mrUrl` only for a real PR/MR URL. `done` means AI/operator work is ready for human acceptance via `/api/items/verify`.
+There is no second authored or bidirectionally synchronized skill. A copied `scout-manual-workflow` installed by `npx skills` under `~/.agents/skills`, project agent-skill directories, or the OpenCode global skill directory is stale and unsupported; remove that copy before creating the developer symlink. Do not run `npx skills update` for this skill.
 
-Widget-created items may include `debugContext`, which stores the captured page, navigation, user actions, console warnings/errors, failed/slow network summaries, performance timing, and a compact rrweb `recordingSummary`. The `/scout` workflow should inspect those structured fields before downloading a full rrweb recording; open the dashboard player or parse the recording JSON only when the bug depends on path, timing, navigation, redirects, or missing context.
+## Developer Projection
 
-Human queue tabs are status groups, not separate states: `Open` = `new`, `In Progress` = `in_progress`, `Needs Review` = `review` + `changes_requested`, `Needs Acceptance` = `done`, `Accepted` = `verified`, and `Archived` = `cancelled`.
+For OpenCode launched inside this repository, no projection or installation is needed.
 
-The command works without arguments and defaults to full active queue scope. Text after `/scout` is natural-language scope input: it may identify an item, project, branch, deploy target, single-next work, full-queue work, needs-review follow-up, changes-requested follow-up, runtime-error follow-up, or done/verified audit behavior. Arguments are not a structured subcommand API.
+For development use outside the checkout:
 
-## Developer linked setup
-
-Installed `/scout` works without a local Scout repository clone when the command, skill, and Scout API credentials (`SCOUT_URL`, `SCOUT_PROJECT_SLUG`, `SCOUT_API_KEY`) are present. The workflow must use live OpenAPI as its only API contract and must use `/items/resolve` as the single AI/operator completion endpoint.
-
-When running OpenCode from this repository, no skill installation is required. `.opencode/opencode.json` loads `skills/`, and `.opencode/commands/scout.md` provides `/scout` from the checkout.
-
-If you develop Scout and need `/scout` outside this repository, link your global OpenCode paths to this checkout once instead of reinstalling after every edit:
-
-```bash
-repo=/path/to/scout
-mkdir -p "$HOME/.config/opencode/commands" "$HOME/.config/opencode/skills"
-ln -sf "$repo/.opencode/commands/scout.md" "$HOME/.config/opencode/commands/scout.md"
-if [ -e "$HOME/.config/opencode/skills/scout-manual-workflow" ] || [ -L "$HOME/.config/opencode/skills/scout-manual-workflow" ]; then
-  mv "$HOME/.config/opencode/skills/scout-manual-workflow" "$HOME/.config/opencode/scout-manual-workflow.backup-$(date +%Y%m%d%H%M%S)"
-fi
-ln -s "$repo/skills/scout-manual-workflow" "$HOME/.config/opencode/skills/scout-manual-workflow"
-if [ -e "$HOME/.agents/skills/scout-manual-workflow" ] || [ -L "$HOME/.agents/skills/scout-manual-workflow" ]; then
-  mv "$HOME/.agents/skills/scout-manual-workflow" "$HOME/.agents/scout-manual-workflow.backup-$(date +%Y%m%d%H%M%S)"
-fi
-```
-
-Restart OpenCode after changing linked commands, skills, or OpenCode config. Do not run `npx skills update` as the local development sync mechanism.
-
-## Released install/update
-
-Normal users should install the released command globally from a Scout checkout:
+1. Remove any existing copied or vendor-installed `scout-manual-workflow` from OpenCode and external agent skill locations so it cannot compete with the repo owner.
+2. Create `~/.config/opencode/skills/scout-manual-workflow` as a symlink to `<SCOUT_REPO>/skills/scout-manual-workflow`.
+3. Install the global command copy from the checkout:
 
 ```bash
 ./scripts/install-opencode-commands.sh
 ```
 
-By default this copies commands to `~/.config/opencode/commands`. Override the target with `OPENCODE_COMMANDS_DIR=/path/to/commands` if needed. Restart OpenCode after installing or updating commands.
+Set `OPENCODE_COMMANDS_DIR=<COMMANDS_DIR>` only when the global command target differs from `~/.config/opencode/commands`.
 
-Install the released skill globally from GitHub:
+The skill symlink reflects repo edits immediately on the next OpenCode start. The command is intentionally a one-way copy: after changing `.opencode/commands/scout.md`, rerun the installer. Never edit the global command copy and sync it back into the repository.
 
-```bash
-npx skills add scout-dev-org/scout --skill scout-manual-workflow --full-depth -g -y
-```
+Restart OpenCode after changing the skill, references, command, or `.opencode/opencode.json`; the running process retains already-loaded configuration and skill context.
 
-Install the released skill into the current project instead:
+## Runtime Configuration
 
-```bash
-npx skills add scout-dev-org/scout --skill scout-manual-workflow --full-depth -p -y
-```
+Provide `SCOUT_URL`, `SCOUT_PROJECT_SLUG`, and `SCOUT_API_KEY` through the shell, an ignored local `.env`, or another private credential store. Keep real credentials out of this repository and durable Scout notes.
 
-Update a released global install later:
-
-```bash
-npx skills update scout-manual-workflow -g -y
-```
-
-If installed project-locally, update from that project:
-
-```bash
-npx skills update scout-manual-workflow -p -y
-```
-
-List released skills available from GitHub without installing:
-
-```bash
-npx skills add scout-dev-org/scout --list --full-depth
-```
-
-Required runtime configuration is intentionally not stored in this repository. Set it in your shell, local `.env`, or another private credential store.
-
-Create the key from Scout: `Projects` → target project → `Manage integrations` → `Create agent key`. Scout shows the full key and a ready-to-copy env block once.
-
-For a shell session, use `export`:
-
-```bash
-export SCOUT_URL="https://your-scout.example"
-export SCOUT_API_KEY="<CHANGE-ME-sk_live-api-key>"
-export SCOUT_PROJECT_SLUG="<CHANGE-ME-project-slug>"
-```
-
-For a dotenv file, omit `export`:
-
-```dotenv
-SCOUT_URL=https://your-scout.example
-SCOUT_API_KEY=<CHANGE-ME-sk_live-api-key>
-SCOUT_PROJECT_SLUG=<CHANGE-ME-project-slug>
-```
-
-If you load a dotenv file with plain shell `source`, export variables before launching the agent:
-
-```bash
-set -a
-source .env
-set +a
-opencode
-```
-
-Do not commit Scout API keys, cookies, JWTs, or environment files with real credentials.
-
-For runtime error group work, the agent key also needs the relevant `errors:*` scopes. Use `errors:read` for linked error inspection, `errors:triage` for ignore/unignore actions, and `errors:write` only for ingestion/upsert automation. Runtime ingestion auto-accepts linked system items as `verified`; normal agents should treat them as operational context unless explicitly asked to audit runtime errors. The Alertmanager bridge shared secret is server-side integration material, not a normal manual-agent credential.
+The skill fetches live OpenAPI at the start of each run. `/items/resolve` remains the canonical AI/operator completion path, while human acceptance remains a separate explicitly authorized action discovered from the live contract.

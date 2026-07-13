@@ -142,51 +142,23 @@ User APIs use `projectRoles` for per-project access assignment.
 
 ## Agent Skill
 
-Scout also ships an agent skill for manual bug-tracker work. It is useful when a coding agent should take Scout work, triage related items, inspect linked runtime error context and browser debug context when present, use rrweb session replay as DOM/event evidence, reproduce bugs, fix them in a local repository, verify results, commit and push safe non-production branches when repo policy allows, run staging verification when a canonical path exists, and update Scout notes/statuses with structured evidence without relying on background automation.
+Scout ships the `scout-manual-workflow` agent skill and one thin OpenCode command, `/scout`. The repository skill is the only authored owner; it selects single-item, queue, delivery, and explicit audit workflows from the user's arguments and live Scout state.
 
-When operating from this skill, the agent should always lead the project like a responsible maintainer and default to completing all solvable work itself. It should not ask for routine choices about prioritization, verification, push, staging deploy, or Scout handoff. Hard gates remain for production releases, external communications, destructive user-data actions, secrets exposure, live-money/provider actions, and human acceptance. Arguments after `/scout` choose the work scope, not a weaker behavior profile.
-
-For OpenCode users, Scout ships a single slash command: `/scout`. With no arguments it defaults to full active queue scope and drives every actionable item as far as it can honestly go with the available access and safety constraints. Arguments can narrow the scope to a single item, single-next work, needs-review follow-up, changes-requested follow-up, runtime-error follow-up, or done/verified audit scope. The command runs the full Scout workflow through `scout-manual-workflow`.
-
-When running OpenCode from this repository, no skill installation is required: `.opencode/opencode.json` loads the repo `skills/` directory directly.
-
-For normal users who want `/scout` outside this repository, install the released command from a Scout checkout:
+When OpenCode runs inside this repository, `.opencode/opencode.json` loads the repo skill directly. For development use outside the checkout, project the skill with the documented global symlink and install the command as a one-way copy:
 
 ```bash
 ./scripts/install-opencode-commands.sh
 ```
 
-Install the released skill globally:
+Do not install or update a separate copied skill with `npx skills`; stale installed copies are unsupported. `skills/README.md` defines the exact source, projection, update, and restart path.
 
-```bash
-npx skills add scout-dev-org/scout --skill scout-manual-workflow --full-depth -g -y
-```
-
-Update later:
-
-```bash
-npx skills update scout-manual-workflow -g -y
-```
-
-Create an agent API key from the dashboard: `Projects` → target project → `Manage integrations` → `Create agent key`. The full `sk_live_*` key is shown once together with a ready-to-copy `SCOUT_*` env block. Store it in a password manager, shell environment, or local ignored `.env`, not in the repository.
-
-After installation, `/scout` does not require a local Scout repository clone. It needs the installed `scout-manual-workflow` skill, the installed command, and Scout API credentials (`SCOUT_URL`, `SCOUT_PROJECT_SLUG`, `SCOUT_API_KEY`). At the start of the run the skill reads `$SCOUT_URL/api/docs/openapi.json`, resolves the slug to the project id through the documented project endpoints, and follows that contract exactly.
-
-Scout developers who want live command or skill edits outside this checkout should use the linked setup in `skills/README.md` instead of reinstalling after each change. Restart OpenCode after changing commands, skills, or OpenCode config.
+Create an agent API key from the dashboard and store it in a password manager, shell environment, or local ignored `.env`, not in the repository.
 
 ## API
 
-The live API contract at `/api/docs/openapi.json` is the single source of truth for clients, installed agent skills, and operator workflows. Use it for every endpoint method, URL, request body, and response shape. Do not infer REST-style item URLs or payload fields from endpoint names.
+The live API contract at `/api/docs/openapi.json` is the single source of truth for clients, agent skills, and operator workflows. Use it for every endpoint method, URL, request body, allowed value, and response shape; do not preserve copied schema or payload details in documentation.
 
-For AI/operator completion, `/api/items/resolve` is the single endpoint: it accepts active `new`, `changes_requested`, `in_progress`, and `review` items with inline passing target evidence, stores that evidence as `verification`, and moves the item to `done` for human acceptance. Do not pre-call `/items/claim` or `/items/update-status` only to make completion legal. Derive optional and nullable evidence fields from the live OpenAPI contract at runtime.
-
-Auth via `Authorization: Bearer <jwt|api-key>`.
-
-Base path: `/api/`.
-
-OpenAPI is served at `/api/docs/openapi.json`, but its `paths` keys are relative to `servers[0].url`. For example, the spec lists `/items/list`; the runtime URL is `/api/items/list`.
-
-Successful JSON responses are wrapped in `data`; error responses use `error` and usually `code`. Scout does not use REST-style item URLs such as `/api/items/<id>`; unknown `/api/*` paths return JSON `API_ENDPOINT_NOT_FOUND` with a link to `/api/docs/openapi.json` instead of dashboard HTML.
+For AI/operator completion, `/items/resolve` is the canonical path with inline acceptance evidence. Human acceptance is a separate explicitly authorized action. Discover both operations from the live contract rather than relying on cached payload rules.
 
 Interactive docs: `https://your-scout.example/api/docs`
 
