@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ITEM_STATUSES, WEBHOOK_EVENT_TYPES } from '../db/schema.js';
 import {
+  DONE_EVIDENCE_LEVELS,
   ITEM_EVIDENCE_COVERAGES,
   ITEM_EVIDENCE_KINDS,
   ITEM_EVIDENCE_LEVELS,
@@ -42,17 +43,19 @@ const nullableOptional = <T extends z.ZodTypeAny>(schema: T) => z.preprocess(
   schema.optional(),
 );
 
+const nonBlankText = (maxLength: number) => z.string().trim().min(1).max(maxLength);
+
 export const itemEvidenceSchema = z.object({
   kind: z.enum(ITEM_EVIDENCE_KINDS).default('handoff'),
   result: nullableOptional(z.enum(ITEM_EVIDENCE_RESULTS)),
   level: nullableOptional(z.enum(ITEM_EVIDENCE_LEVELS)),
   coverage: nullableOptional(z.enum(ITEM_EVIDENCE_COVERAGES)),
-  environment: z.string().min(1).max(100),
+  environment: nonBlankText(100),
   role: nullableOptional(z.string().max(100)),
   url: nullableOptional(z.string().max(1000)),
-  scenario: z.string().min(1).max(2000),
-  action: z.string().min(1).max(2000),
-  visibleResult: z.string().min(1).max(2000),
+  scenario: nonBlankText(2000),
+  action: nonBlankText(2000),
+  visibleResult: nonBlankText(2000),
   acceptanceScope: nullableOptional(z.string().max(2000)),
   consoleResult: nullableOptional(z.string().max(2000)),
   networkResult: nullableOptional(z.string().max(2000)),
@@ -66,6 +69,13 @@ export const itemEvidenceSchema = z.object({
   uncheckedRisks: nullableOptional(z.string().max(2000)),
   source: nullableOptional(z.enum(ITEM_EVIDENCE_SOURCES)),
   verifiedAt: nullableOptional(z.string().datetime()),
+});
+
+export const completionEvidenceSchema = itemEvidenceSchema.extend({
+  result: z.literal('pass'),
+  level: z.enum(DONE_EVIDENCE_LEVELS),
+  coverage: z.enum(ITEM_EVIDENCE_COVERAGES),
+  acceptanceScope: nonBlankText(2000),
 });
 
 export type ItemEvidenceInput = z.infer<typeof itemEvidenceSchema>;
@@ -176,20 +186,24 @@ export const countItemsSchema = z.object({
   itemType: itemTypeSchema.optional(),
 });
 
-export const claimItemSchema = z.object({ id: uuidSchema });
-
-export const resolveItemSchema = z.object({
+const itemRevisionSchema = z.string().min(1).max(64);
+const itemMutationSchema = z.object({
   id: uuidSchema,
+  updatedAt: itemRevisionSchema,
+});
+
+export const claimItemSchema = itemMutationSchema;
+
+export const resolveItemSchema = itemMutationSchema.extend({
   resolutionNote: z.string().max(5000).optional(),
   branchName: z.string().max(255).optional(),
   mrUrl: z.string().url().max(500).optional(),
-  evidence: itemEvidenceSchema.optional(),
+  evidence: completionEvidenceSchema.optional(),
 });
 
-export const cancelItemSchema = z.object({ id: uuidSchema });
+export const cancelItemSchema = itemMutationSchema;
 
-export const updateItemStatusSchema = z.object({
-  id: uuidSchema,
+export const updateItemStatusSchema = itemMutationSchema.extend({
   status: updateItemStatusTargetSchema,
   branchName: z.string().max(255).optional(),
   mrUrl: z.string().url().max(500).optional(),
@@ -197,14 +211,12 @@ export const updateItemStatusSchema = z.object({
   evidence: itemEvidenceSchema.optional(),
 });
 
-export const verifyItemSchema = z.object({
-  id: uuidSchema,
+export const verifyItemSchema = itemMutationSchema.extend({
   comment: z.string().max(5000).optional(),
   evidence: itemEvidenceSchema.optional(),
 });
 
-export const requestChangesItemSchema = z.object({
-  id: uuidSchema,
+export const requestChangesItemSchema = itemMutationSchema.extend({
   summary: z.string().min(3).max(2000),
   expected: z.string().min(1).max(2000),
   actual: z.string().min(1).max(2000),
@@ -213,10 +225,9 @@ export const requestChangesItemSchema = z.object({
   evidence: itemEvidenceSchema.optional(),
 });
 
-export const deleteItemSchema = z.object({ id: uuidSchema });
+export const deleteItemSchema = itemMutationSchema;
 
-export const updateItemSchema = z.object({
-  id: uuidSchema,
+export const updateItemSchema = itemMutationSchema.extend({
   itemType: itemTypeSchema.optional(),
   message: z.string().min(3).optional(),
   assigneeId: uuidSchema.nullish(),
@@ -224,8 +235,7 @@ export const updateItemSchema = z.object({
   labels: z.array(z.string().max(50)).max(10).optional(),
 });
 
-export const reopenItemSchema = z.object({
-  id: uuidSchema,
+export const reopenItemSchema = itemMutationSchema.extend({
   status: z.enum(['new', 'in_progress']).optional(),
   reason: z.enum(['audit_failed', 'audit_blocked', 'staging_failed', 'regression', 'manual']).optional(),
   auditResult: z.enum(['fail', 'blocked']).optional(),

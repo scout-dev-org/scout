@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback, type FormEvent } from 'react'
 import { useParams, useNavigate } from 'react-router';
 import { Fancybox } from '@fancyapps/ui';
 import '@fancyapps/ui/dist/fancybox/fancybox.css';
-import { api } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 import { formatDate } from '../lib/date';
 import { isAdmin, storageUrl } from '../lib/auth';
 import { useSSE, type SSEEventType } from '../hooks/useSSE';
@@ -449,17 +449,21 @@ export default function ItemDetail() {
   // Review/done handoff modal state
   const [showHandoffModal, setShowHandoffModal] = useState(false);
   const [handoffStatus, setHandoffStatus] = useState<HandoffStatus>('done');
+  const [handoffRevision, setHandoffRevision] = useState('');
   const [resolutionNote, setResolutionNote] = useState('');
   const [branchName, setBranchName] = useState('');
   const [mrUrl, setMrUrl] = useState('');
   const [evidenceDraft, setEvidenceDraft] = useState<EvidenceDraft>(initialEvidenceDraft);
   const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [verifyRevision, setVerifyRevision] = useState('');
   const [verifyComment, setVerifyComment] = useState('');
   const [showChangesModal, setShowChangesModal] = useState(false);
+  const [changesRevision, setChangesRevision] = useState('');
   const [changeRequest, setChangeRequest] = useState<ChangeRequestDraft>(initialChangeRequestDraft);
 
   // Edit mode state
   const [editing, setEditing] = useState(false);
+  const [editRevision, setEditRevision] = useState('');
   const [editItemType, setEditItemType] = useState<'bug' | 'note' | 'task'>('bug');
   const [editMessage, setEditMessage] = useState('');
   const [editPriority, setEditPriority] = useState('medium');
@@ -478,16 +482,27 @@ export default function ItemDetail() {
   const [linkType, setLinkType] = useState('related');
   const [linkSaving, setLinkSaving] = useState(false);
 
-  async function loadItem() {
+  async function loadItem(): Promise<boolean> {
     try {
       setLoading(true);
       const data = await api<ItemData>('/api/items/get', { id });
       setItem(data);
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : t('validation.loadError'));
+      return false;
     } finally {
       setLoading(false);
     }
+  }
+
+  async function refreshAfterConflict(err: unknown): Promise<boolean> {
+    if (!(err instanceof ApiError) || err.status !== 409) return false;
+    return loadItem();
+  }
+
+  function mutationErrorMessage(err: unknown, fallback: string): string {
+    return err instanceof Error ? err.message : fallback;
   }
 
   async function loadUsers() {
@@ -574,15 +589,16 @@ export default function ItemDetail() {
     setActionLoading(true);
     try {
       if (action === 'claim') {
-        await api('/api/items/claim', { id: item.id });
+        await api('/api/items/claim', { id: item.id, updatedAt: item.updatedAt }, t);
       } else if (action === 'cancel') {
-        await api('/api/items/cancel', { id: item.id });
+        await api('/api/items/cancel', { id: item.id, updatedAt: item.updatedAt }, t);
       } else if (action === 'update-status') {
-        await api('/api/items/update-status', { id: item.id, ...extra });
+        await api('/api/items/update-status', { id: item.id, updatedAt: item.updatedAt, ...extra }, t);
       }
       await loadItem();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('validation.requestError'));
+      await refreshAfterConflict(err);
+      setError(mutationErrorMessage(err, t('validation.requestError')));
     } finally {
       setActionLoading(false);
     }
@@ -593,6 +609,7 @@ export default function ItemDetail() {
     setError('');
     setModalError('');
     setHandoffStatus(status);
+    setHandoffRevision(item.updatedAt);
     setResolutionNote('');
     setBranchName('');
     setMrUrl('');
@@ -616,12 +633,16 @@ export default function ItemDetail() {
 
   const baseEvidenceReady = evidenceRequiredFields.every((field) => evidenceDraft[field].trim().length > 0);
   const passingEvidenceReady = evidenceDraft.result === 'pass';
-  const reviewEvidenceReady = handoffStatus !== 'review' || Boolean(evidenceDraft.commitSha.trim() || mrUrl.trim());
-  const doneEvidenceReady = handoffStatus !== 'done' || doneEvidenceLevels.includes(evidenceDraft.level);
+  const reviewEvidenceReady = handoffStatus !== 'review' || evidenceDraft.commitSha.trim().length > 0;
+  const doneEvidenceReady = handoffStatus !== 'done' || (
+    doneEvidenceLevels.includes(evidenceDraft.level)
+    && Boolean(evidenceDraft.coverage)
+    && evidenceDraft.acceptanceScope.trim().length > 0
+  );
   const evidenceReady = baseEvidenceReady && passingEvidenceReady && reviewEvidenceReady && doneEvidenceReady;
 
   async function handleHandoff() {
-    if (!item || !evidenceReady) return;
+    if (!item || !handoffRevision || !evidenceReady) return;
     setActionLoading(true);
     setModalError('');
     try {
@@ -629,19 +650,21 @@ export default function ItemDetail() {
       if (handoffStatus === 'done') {
         await api('/api/items/resolve', {
           id: item.id,
+          updatedAt: handoffRevision,
           resolutionNote: resolutionNote || undefined,
           branchName: branchName || undefined,
           mrUrl: mrUrl || undefined,
           evidence,
-        });
+        }, t);
       } else {
         await api('/api/items/update-status', {
           id: item.id,
+          updatedAt: handoffRevision,
           status: 'review',
           branchName: branchName || undefined,
           mrUrl: mrUrl || undefined,
           evidence,
-        });
+        }, t);
       }
       setShowHandoffModal(false);
       setResolutionNote('');
@@ -650,22 +673,32 @@ export default function ItemDetail() {
       setEvidenceDraft(initialEvidenceDraft);
       await loadItem();
     } catch (err) {
-      setModalError(err instanceof Error ? err.message : t('validation.requestError'));
+      const message = mutationErrorMessage(err, t('validation.requestError'));
+      if (await refreshAfterConflict(err)) {
+        setShowHandoffModal(false);
+        setError(message);
+      } else {
+        setModalError(message);
+      }
     } finally {
       setActionLoading(false);
     }
   }
 
   function openVerifyModal() {
+    if (!item) return;
     setError('');
     setModalError('');
+    setVerifyRevision(item.updatedAt);
     setVerifyComment('');
     setShowVerifyModal(true);
   }
 
   function openChangesModal() {
+    if (!item) return;
     setError('');
     setModalError('');
+    setChangesRevision(item.updatedAt);
     setChangeRequest({
       ...initialChangeRequestDraft,
       url: item?.pageUrl ?? '',
@@ -680,42 +713,56 @@ export default function ItemDetail() {
   const changeRequestReady = Boolean(changeRequest.summary.trim() && changeRequest.expected.trim() && changeRequest.actual.trim());
 
   async function handleVerify() {
-    if (!item) return;
+    if (!item || !verifyRevision) return;
     setActionLoading(true);
     setModalError('');
     try {
       await api('/api/items/verify', {
         id: item.id,
+        updatedAt: verifyRevision,
         comment: verifyComment.trim() || undefined,
-      });
+      }, t);
       setShowVerifyModal(false);
       setVerifyComment('');
       await loadItem();
     } catch (err) {
-      setModalError(err instanceof Error ? err.message : t('validation.requestError'));
+      const message = mutationErrorMessage(err, t('validation.requestError'));
+      if (await refreshAfterConflict(err)) {
+        setShowVerifyModal(false);
+        setError(message);
+      } else {
+        setModalError(message);
+      }
     } finally {
       setActionLoading(false);
     }
   }
 
   async function handleRequestChanges() {
-    if (!item || !changeRequestReady) return;
+    if (!item || !changesRevision || !changeRequestReady) return;
     setActionLoading(true);
     setModalError('');
     try {
       await api('/api/items/request-changes', {
         id: item.id,
+        updatedAt: changesRevision,
         summary: changeRequest.summary.trim(),
         expected: changeRequest.expected.trim(),
         actual: changeRequest.actual.trim(),
         steps: changeRequest.steps.trim() || undefined,
         url: changeRequest.url.trim() || undefined,
-      });
+      }, t);
       setShowChangesModal(false);
       setChangeRequest(initialChangeRequestDraft);
       await loadItem();
     } catch (err) {
-      setModalError(err instanceof Error ? err.message : t('validation.requestError'));
+      const message = mutationErrorMessage(err, t('validation.requestError'));
+      if (await refreshAfterConflict(err)) {
+        setShowChangesModal(false);
+        setError(message);
+      } else {
+        setModalError(message);
+      }
     } finally {
       setActionLoading(false);
     }
@@ -726,10 +773,11 @@ export default function ItemDetail() {
     if (!window.confirm(t('items.detail.deleteConfirm'))) return;
     setActionLoading(true);
     try {
-      await api('/api/items/delete', { id: item.id });
+      await api('/api/items/delete', { id: item.id, updatedAt: item.updatedAt }, t);
       navigate('/items');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('validation.deleteError'));
+      await refreshAfterConflict(err);
+      setError(mutationErrorMessage(err, t('validation.deleteError')));
       setActionLoading(false);
     }
   }
@@ -740,10 +788,12 @@ export default function ItemDetail() {
     try {
       await api('/api/items/reopen', {
         id: item.id,
-      });
+        updatedAt: item.updatedAt,
+      }, t);
       await loadItem();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('validation.requestError'));
+      await refreshAfterConflict(err);
+      setError(mutationErrorMessage(err, t('validation.requestError')));
     } finally {
       setActionLoading(false);
     }
@@ -753,10 +803,11 @@ export default function ItemDetail() {
     if (!item || item.itemType !== 'note') return;
     setActionLoading(true);
     try {
-      await api('/api/items/update', { id: item.id, itemType: 'task' });
+      await api('/api/items/update', { id: item.id, updatedAt: item.updatedAt, itemType: 'task' }, t);
       await loadItem();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('validation.updateError'));
+      await refreshAfterConflict(err);
+      setError(mutationErrorMessage(err, t('validation.updateError')));
     } finally {
       setActionLoading(false);
     }
@@ -765,6 +816,7 @@ export default function ItemDetail() {
   function startEditing() {
     if (!item) return;
     setEditItemType(item.itemType);
+    setEditRevision(item.updatedAt);
     setEditMessage(item.message);
     setEditPriority(item.priority ?? 'medium');
     setEditLabels(parseLabels(item.labels).join(', '));
@@ -772,7 +824,7 @@ export default function ItemDetail() {
   }
 
   async function handleEditSave() {
-    if (!item || !editMessage.trim()) return;
+    if (!item || !editRevision || !editMessage.trim()) return;
     setEditSaving(true);
     try {
       const labelsArr = editLabels
@@ -781,15 +833,17 @@ export default function ItemDetail() {
         .filter((l) => l.length > 0);
       await api('/api/items/update', {
         id: item.id,
+        updatedAt: editRevision,
         itemType: editItemType,
         message: editMessage.trim(),
         ...(editItemType !== 'note' ? { priority: editPriority } : {}),
         labels: labelsArr,
-      });
+      }, t);
       setEditing(false);
       await loadItem();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('validation.saveError'));
+      if (await refreshAfterConflict(err)) setEditing(false);
+      setError(mutationErrorMessage(err, t('validation.saveError')));
     } finally {
       setEditSaving(false);
     }
@@ -801,11 +855,13 @@ export default function ItemDetail() {
     try {
       await api('/api/items/update', {
         id: item.id,
+        updatedAt: item.updatedAt,
         assigneeId: assigneeId || null,
-      });
+      }, t);
       await loadItem();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('validation.assignError'));
+      await refreshAfterConflict(err);
+      setError(mutationErrorMessage(err, t('validation.assignError')));
     } finally {
       setAssigneeLoading(false);
     }
@@ -1770,7 +1826,9 @@ export default function ItemDetail() {
             </div>
             <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
               <label className="block">
-                <span className="text-sm font-medium text-gray-700">{t('items.detail.evidence.coverage')}</span>
+                <span className="text-sm font-medium text-gray-700">
+                  {t('items.detail.evidence.coverage')}{handoffStatus === 'done' ? ' *' : ''}
+                </span>
                 <select
                   value={evidenceDraft.coverage}
                   onChange={(e) => updateEvidenceField('coverage', e.target.value)}
@@ -1833,7 +1891,14 @@ export default function ItemDetail() {
             <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
               {(['consoleResult', 'networkResult', 'apiResult', 'dbResult', 'fixture', 'cleanupResult', 'commitSha', 'deploySha', 'acceptanceScope', 'risks', 'uncheckedRisks'] as Array<keyof EvidenceDraft>).map((field) => (
                 <label key={field} className="block">
-                  <span className="text-sm font-medium text-gray-700">{t(`items.detail.evidence.${field}`)}</span>
+                  <span className="text-sm font-medium text-gray-700">
+                    {t(`items.detail.evidence.${field}`)}{
+                      (handoffStatus === 'done' && field === 'acceptanceScope')
+                      || (handoffStatus === 'review' && field === 'commitSha')
+                        ? ' *'
+                        : ''
+                    }
+                  </span>
                   <textarea
                     value={evidenceDraft[field]}
                     onChange={(e) => updateEvidenceField(field, e.target.value)}

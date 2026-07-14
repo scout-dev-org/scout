@@ -27,7 +27,7 @@ const ONE_PIXEL_IMAGE_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAA
 let e2eRequestCounter = 0;
 
 // Shared token cache file — avoids rate-limited logins between browser projects
-const TOKEN_CACHE = join(__dirname, '.token-cache.json');
+const TOKEN_CACHE = process.env.SCOUT_E2E_TOKEN_CACHE || join(__dirname, '.token-cache.json');
 
 // Helpers
 function nextE2eClientIp(): string {
@@ -86,9 +86,15 @@ test.describe('Full bug lifecycle', () => {
       try {
         const cached = JSON.parse(readFileSync(TOKEN_CACHE, 'utf-8'));
         if (cached.adminToken && cached.projectId) {
-          adminToken = cached.adminToken;
-          projectId = cached.projectId;
-          return;
+          const { status, data } = await apiPost('/projects/list', {}, cached.adminToken);
+          const projectExists = data?.data?.items?.some(
+            (project: { id?: string }) => project.id === cached.projectId,
+          );
+          if (status === 200 && projectExists) {
+            adminToken = cached.adminToken;
+            projectId = cached.projectId;
+            return;
+          }
         }
       } catch { /* cache corrupt — re-login */ }
     }
@@ -162,23 +168,28 @@ test.describe('Full bug lifecycle', () => {
     expect(getItem.data.message).toBe(createMsg);
     expect(getItem.data.priority).toBe('high');
     expect(getItem.data.status).toBe('new');
+    let itemRevision = getItem.data.updatedAt;
 
     // Update message + priority
-    const { status: updateStatus } = await apiPost('/items/update', {
+    const { status: updateStatus, data: updateData } = await apiPost('/items/update', {
       id: itemId,
+      updatedAt: itemRevision,
       message: createMsg + ' (updated)',
       priority: 'critical',
       labels: ['e2e', 'test', 'updated'],
     }, adminToken);
     expect(updateStatus).toBe(200);
+    itemRevision = updateData.data.updatedAt;
 
     // Claim (new → in_progress)
-    const { status: claimStatus } = await apiPost('/items/claim', { id: itemId }, adminToken);
+    const { status: claimStatus, data: claimData } = await apiPost('/items/claim', { id: itemId, updatedAt: itemRevision }, adminToken);
     expect(claimStatus).toBe(200);
+    itemRevision = claimData.data.updatedAt;
 
     // Update status (in_progress → review)
-    const { status: reviewStatus } = await apiPost('/items/update-status', {
+    const { status: reviewStatus, data: reviewData } = await apiPost('/items/update-status', {
       id: itemId,
+      updatedAt: itemRevision,
       status: 'review',
       evidence: passingEvidence(
         'API lifecycle item is ready for review',
@@ -188,10 +199,12 @@ test.describe('Full bug lifecycle', () => {
       ),
     }, adminToken);
     expect(reviewStatus).toBe(200);
+    itemRevision = reviewData.data.updatedAt;
 
     // Resolve (review → done)
-    const { status: resolveStatus } = await apiPost('/items/resolve', {
+    const { status: resolveStatus, data: resolveData } = await apiPost('/items/resolve', {
       id: itemId,
+      updatedAt: itemRevision,
       resolutionNote: 'Fixed in E2E test',
       evidence: passingEvidence(
         'API lifecycle item is complete',
@@ -200,6 +213,7 @@ test.describe('Full bug lifecycle', () => {
       ),
     }, adminToken);
     expect(resolveStatus).toBe(200);
+    itemRevision = resolveData.data.updatedAt;
 
     // Verify done status: implementation is ready, but not human-accepted yet
     const { data: doneItem } = await apiPost('/items/get', { id: itemId }, adminToken);
@@ -207,19 +221,22 @@ test.describe('Full bug lifecycle', () => {
     expect(doneItem.data.resolutionNote).toBe('Fixed in E2E test');
 
     // Human acceptance (done → verified)
-    const { status: verifyStatus } = await apiPost('/items/verify', {
+    const { status: verifyStatus, data: verifyData } = await apiPost('/items/verify', {
       id: itemId,
+      updatedAt: itemRevision,
       comment: 'E2E human acceptance check passed',
     }, adminToken);
     expect(verifyStatus).toBe(200);
+    itemRevision = verifyData.data.updatedAt;
 
     const { data: verifiedItem } = await apiPost('/items/get', { id: itemId }, adminToken);
     expect(verifiedItem.data.status).toBe('verified');
     expect(verifiedItem.data.resolutionNote).toBe('Fixed in E2E test');
 
     // Reopen (verified → new)
-    const { status: reopenStatus } = await apiPost('/items/reopen', { id: itemId }, adminToken);
+    const { status: reopenStatus, data: reopenData } = await apiPost('/items/reopen', { id: itemId, updatedAt: itemRevision }, adminToken);
     expect(reopenStatus).toBe(200);
+    itemRevision = reopenData.data.updatedAt;
 
     // Add note
     const { status: noteStatus } = await apiPost('/items/add-note', {
@@ -233,12 +250,62 @@ test.describe('Full bug lifecycle', () => {
     expect(comments.length).toBeGreaterThan(0);
 
     // Delete
-    const { status: deleteStatus } = await apiPost('/items/delete', { id: itemId }, adminToken);
+    const { status: deleteStatus } = await apiPost('/items/delete', { id: itemId, updatedAt: itemRevision }, adminToken);
     expect(deleteStatus).toBe(200);
 
     // Verify deleted
     const { status: getDeleted } = await apiPost('/items/get', { id: itemId }, adminToken);
     expect(getDeleted).toBe(404);
+  });
+
+  test('Dashboard: failed conflict refresh keeps the verification modal open', async ({ page }) => {
+    const { data: createData } = await apiPost('/items/create', {
+      projectId,
+      message: `Conflict refresh ${Date.now()}`,
+    }, adminToken);
+    const itemId = createData.data.id;
+    const { data: resolveData } = await apiPost('/items/resolve', {
+      id: itemId,
+      updatedAt: createData.data.updatedAt,
+      evidence: passingEvidence(
+        'Conflict refresh modal behavior',
+        'Prepared a done item for the dashboard verification flow',
+        'The item is ready for human acceptance',
+      ),
+    }, adminToken);
+
+    await page.goto(DASHBOARD);
+    await page.evaluate((tk) => {
+      localStorage.setItem('scout_token', tk);
+      localStorage.setItem('scout_user', JSON.stringify({ id: '1', email: 'admin@scout.local', name: 'Admin' }));
+    }, adminToken);
+    await page.goto(`${DASHBOARD}/items/${itemId}`);
+    await page.getByRole('button', { name: 'Verify' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Accept result' });
+    await expect(dialog).toBeVisible();
+
+    let failedRefreshRequests = 0;
+    await page.route(/\/api\/items\/verify$/, (route) => route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'Item state changed concurrently', code: 'ITEM_STATE_CONFLICT' }),
+    }));
+    await page.route(/\/api\/items\/get$/, (route) => {
+      failedRefreshRequests += 1;
+      return route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Refresh failed' }),
+      });
+    });
+
+    await dialog.getByRole('button', { name: 'Confirm verification' }).click();
+
+    await expect.poll(() => failedRefreshRequests).toBe(1);
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('The issue changed elsewhere');
+
+    await apiPost('/items/delete', { id: itemId, updatedAt: resolveData.data.updatedAt }, adminToken);
   });
 
   test('4. API: project access isolation', async () => {
@@ -263,7 +330,7 @@ test.describe('Full bug lifecycle', () => {
     // Cleanup
     await apiPost('/items/list', { projectId: isolatedId }, adminToken).then(async ({ data }) => {
       for (const item of data?.data?.items || []) {
-        await apiPost('/items/delete', { id: item.id }, adminToken);
+        await apiPost('/items/delete', { id: item.id, updatedAt: item.updatedAt }, adminToken);
       }
     });
     await apiPost('/projects/delete', { id: isolatedId }, adminToken);
@@ -413,7 +480,7 @@ test.describe('Full bug lifecycle', () => {
     expect(withHeaderRes.status).toBe(200);
 
     // Cleanup
-    await apiPost('/items/delete', { id: createData.data.id }, adminToken);
+    await apiPost('/items/delete', { id: createData.data.id, updatedAt: createData.data.updatedAt }, adminToken);
   });
 
   test('15. Storage: invalid token returns 401', async () => {

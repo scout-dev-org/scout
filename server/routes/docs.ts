@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { ITEM_STATUSES } from '../db/schema.js';
 import {
+  DONE_EVIDENCE_LEVELS,
   ITEM_EVIDENCE_COVERAGES,
   ITEM_EVIDENCE_KINDS,
   ITEM_EVIDENCE_LEVELS,
@@ -15,6 +16,16 @@ import {
 type OpenApiSchema = Record<string, unknown>;
 
 const AUTH_SECURITY = [{ BearerAuth: [] }, { ApiKeyAuth: [] }];
+const STATUS_CONFLICT_RESPONSE = {
+  description: 'Переданный client-observed updatedAt устарел, либо SQLite занят конкурентной записью; перечитайте item и повторите допустимую операцию с новой revision',
+  content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+};
+const ITEM_REVISION_PROPERTY = {
+  type: 'string',
+  minLength: 1,
+  maxLength: 64,
+  description: 'Обязательное точное значение item.updatedAt из последнего прочитанного клиентом item. Устаревшее значение возвращает 409.',
+};
 
 function itemRequestSchema(extraProperties: OpenApiSchema = {}, extraRequired: string[] = []): OpenApiSchema {
   return {
@@ -27,13 +38,17 @@ function itemRequestSchema(extraProperties: OpenApiSchema = {}, extraRequired: s
   };
 }
 
+function itemMutationRequestSchema(extraProperties: OpenApiSchema = {}, extraRequired: string[] = []): OpenApiSchema {
+  return itemRequestSchema({ updatedAt: ITEM_REVISION_PROPERTY, ...extraProperties }, ['updatedAt', ...extraRequired]);
+}
+
 const spec = {
   openapi: '3.0.3',
   info: {
     title: 'Scout Bug Tracking API',
     version: '1.0.0',
     description:
-      'Scout — self-hosted bug tracker for AI-assisted product teams. Agent workflows are expected to drive actionable work to the furthest honest status with structured evidence, asking only for hard gates such as missing access, production release, destructive action, external communication, live-money/provider action, secrets exposure, or human acceptance. Для AI/operator completion используйте один endpoint `/items/resolve`; он сам доводит активные рабочие статусы до `done` при наличии passing target evidence. Все API-эндпоинты используют метод POST с JSON-телом (кроме health, events, docs). Авторизация через Bearer JWT или API Key (`sk_live_...`). OpenAPI path keys are relative to `servers[0].url`: for example `/items/list` becomes `/api/items/list` at runtime. Use the exact method, path, and JSON body fields shown by this OpenAPI document; do not infer REST-style item URLs, query-string item reads, or payload fields from endpoint names. Unknown `/api/*` paths return JSON `API_ENDPOINT_NOT_FOUND` with a docs link and endpoint hint instead of dashboard HTML.',
+      'Scout — self-hosted bug tracker for AI-assisted product teams. Agent workflows are expected to drive actionable work to the furthest honest status with structured evidence, asking only for hard gates such as missing access, production release, destructive action, external communication, live-money/provider action, secrets exposure, or human acceptance. Для AI/operator completion используйте один endpoint `/items/resolve`; он сам доводит активные рабочие статусы до `done` при наличии passing target evidence. Все API-эндпоинты используют метод POST с JSON-телом (кроме health, events, docs). Авторизация через Bearer JWT или API Key (`sk_live_...`). OpenAPI path keys are relative to `servers[0].url`: for example `/items/list` becomes `/api/items/list` at runtime. Use the exact method, path, and JSON body fields shown by this OpenAPI document; do not infer REST-style item URLs, query-string item reads, or payload fields from endpoint names. Compatibility decision: Scout is pre-release, so item mutation requests intentionally make client-observed `updatedAt` mandatory without a legacy fallback; clients must read the item first and send that exact revision, while stale revisions receive 409. Unknown `/api/*` paths return JSON `API_ENDPOINT_NOT_FOUND` with a docs link and endpoint hint instead of dashboard HTML.',
     contact: { url: 'https://your-scout.example' },
   },
   servers: [
@@ -293,12 +308,12 @@ const spec = {
           result: { type: 'string', enum: [...ITEM_EVIDENCE_RESULTS], nullable: true },
           level: { type: 'string', enum: [...ITEM_EVIDENCE_LEVELS], nullable: true },
           coverage: { type: 'string', enum: [...ITEM_EVIDENCE_COVERAGES], nullable: true },
-          environment: { type: 'string', maxLength: 100 },
+          environment: { type: 'string', minLength: 1, maxLength: 100, pattern: '\\S' },
           role: { type: 'string', maxLength: 100, nullable: true },
           url: { type: 'string', maxLength: 1000, nullable: true },
-          scenario: { type: 'string', maxLength: 2000 },
-          action: { type: 'string', maxLength: 2000 },
-          visibleResult: { type: 'string', maxLength: 2000 },
+          scenario: { type: 'string', minLength: 1, maxLength: 2000, pattern: '\\S' },
+          action: { type: 'string', minLength: 1, maxLength: 2000, pattern: '\\S' },
+          visibleResult: { type: 'string', minLength: 1, maxLength: 2000, pattern: '\\S' },
           acceptanceScope: { type: 'string', maxLength: 2000, nullable: true },
           consoleResult: { type: 'string', maxLength: 2000, nullable: true },
           networkResult: { type: 'string', maxLength: 2000, nullable: true },
@@ -313,6 +328,27 @@ const spec = {
           source: { type: 'string', enum: [...ITEM_EVIDENCE_SOURCES], nullable: true },
           verifiedAt: { type: 'string', format: 'date-time', nullable: true },
         },
+      },
+      CompletionEvidenceInput: {
+        allOf: [
+          { $ref: '#/components/schemas/ItemEvidenceInput' },
+          {
+            type: 'object',
+            required: ['result', 'level', 'coverage', 'acceptanceScope'],
+            properties: {
+              result: { type: 'string', enum: ['pass'] },
+              level: { type: 'string', enum: [...DONE_EVIDENCE_LEVELS] },
+              coverage: { type: 'string', enum: [...ITEM_EVIDENCE_COVERAGES] },
+              acceptanceScope: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 2000,
+                pattern: '\\S',
+                description: 'Non-empty, item-specific statement of the acceptance behavior covered by this completion evidence.',
+              },
+            },
+          },
+        ],
       },
       ItemEvidence: {
         allOf: [
@@ -814,7 +850,7 @@ const spec = {
           required: true,
           content: {
             'application/json': {
-              schema: itemRequestSchema(),
+              schema: itemMutationRequestSchema(),
             },
           },
         },
@@ -823,6 +859,7 @@ const spec = {
             description: 'Item обновлён',
             content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Item' } } } } },
           },
+          409: STATUS_CONFLICT_RESPONSE,
           403: { description: 'Недостаточно прав', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           404: { description: 'Item не найден', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
@@ -832,17 +869,17 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Подготовить item к human acceptance (resolve)',
-        description: 'Единственный endpoint для AI/operator completion. Переводит активный item из `new`, `in_progress`, `review` или `changes_requested` в `done` при наличии inline passing target evidence; повторный вызов для уже `done` item идемпотентно обновляет refs/notes/evidence без нового status transition. Для done требуется inline structured evidence в этом запросе: result, level, coverage, environment, scenario, action, visibleResult, and item-specific acceptanceScope. Inline evidence в `/items/resolve` сохраняется как `kind:"verification"`, даже если клиент не указал kind. `verified` и `cancelled` через resolve не меняются. Требуется project permission `workflow` (admin/owner/manager/developer).',
+        description: 'Единственный endpoint для AI/operator completion. Переводит активный item из `new`, `in_progress`, `review` или `changes_requested` в `done` только с inline `CompletionEvidenceInput`: passing result, accepted completion level, coverage и непустые environment/scenario/action/visibleResult/item-specific acceptanceScope обязательны. Переход сохраняет текущего assignee; resolvedById фиксирует выполнившего completion пользователя. Каждый вызов, включая вызов для уже `done` item, обязан передать точный текущий `updatedAt`; stale revision всегда возвращает 409, поскольку запрос не содержит operation/request identity для доказуемо безопасного stale retry. При текущей revision идентичные refs/resolutionNote/evidence не меняют item и не дублируют evidence; изменённые refs/resolutionNote или новое evidence обновляют item и публикуют SSE `item.updated` без нового status transition. Вызов для уже `done` item может не содержать evidence; переданное evidence обязано соответствовать completion schema и сохраняется как `kind:"verification"`. `verified` и `cancelled` через resolve не меняются; конкурентное изменение состояния или revision возвращает 409. Требуется project permission `workflow` (admin/owner/manager/developer).',
         security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: itemRequestSchema({
+              schema: itemMutationRequestSchema({
                 resolutionNote: { type: 'string', maxLength: 5000 },
                 branchName: { type: 'string', maxLength: 255 },
                 mrUrl: { type: 'string', format: 'uri', maxLength: 500 },
-                evidence: { $ref: '#/components/schemas/ItemEvidenceInput' },
+                evidence: { $ref: '#/components/schemas/CompletionEvidenceInput' },
               }),
             },
           },
@@ -852,6 +889,7 @@ const spec = {
             description: 'Item resolved',
             content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Item' } } } } },
           },
+          409: STATUS_CONFLICT_RESPONSE,
           403: { description: 'Недостаточно прав', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           404: { description: 'Item не найден', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
@@ -861,13 +899,13 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Отменить item',
-        description: 'Переводит item в статус cancelled. Требуется project permission `triage`; reporter может отменить свой `new` item.',
+        description: 'Переводит item в статус cancelled, сохраняя assignee. Reporter может отменить только свой item, который всё ещё находится в `new`; конкурентное изменение статуса возвращает 409. Требуется project permission `triage`, кроме указанного reporter-сценария.',
         security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: itemRequestSchema(),
+              schema: itemMutationRequestSchema(),
             },
           },
         },
@@ -876,6 +914,7 @@ const spec = {
             description: 'Item cancelled',
             content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Item' } } } } },
           },
+          409: STATUS_CONFLICT_RESPONSE,
           403: { description: 'Недостаточно прав', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           404: { description: 'Item не найден', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
@@ -885,13 +924,13 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Обновить статус item',
-        description: 'Универсальный эндпоинт только для промежуточных инженерных workflow-переходов в `in_progress` или `review`. Используйте `/items/claim` только для начала длительной работы над новым item, `/items/resolve` как единственный AI/operator completion endpoint для `done`, `/items/verify` для `verified`, `/items/request-changes` для `changes_requested`, `/items/cancel` для `cancelled` и `/items/reopen` для возврата в `new`. Переход в review требует inline structured evidence в этом запросе, включая `result:"pass"` и `commitSha`. Требуется project permission `workflow` (admin/owner/manager/developer).',
+        description: 'Универсальный эндпоинт только для промежуточных инженерных workflow-переходов в `in_progress` или `review`. Используйте `/items/claim` только для начала длительной работы над новым item, `/items/resolve` как единственный AI/operator completion endpoint для `done`, `/items/verify` для `verified`, `/items/request-changes` для `changes_requested`, `/items/cancel` для `cancelled` и `/items/reopen` для возврата в `new`. Переход сохраняет assignee; переход в review требует inline structured evidence в этом запросе, включая `result:"pass"` и `commitSha`. Конкурентное изменение статуса возвращает 409. Требуется project permission `workflow` (admin/owner/manager/developer).',
         security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: itemRequestSchema({
+              schema: itemMutationRequestSchema({
                 status: { type: 'string', enum: [...UPDATE_ITEM_STATUS_TARGETS] },
                 branchName: { type: 'string', maxLength: 255 },
                 mrUrl: { type: 'string', format: 'uri', maxLength: 500 },
@@ -906,6 +945,7 @@ const spec = {
             description: 'Статус обновлён',
             content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Item' } } } } },
           },
+          409: STATUS_CONFLICT_RESPONSE,
           403: { description: 'Недостаточно прав', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           404: { description: 'Item не найден', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
@@ -915,13 +955,13 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Принять item человеком',
-        description: 'Переводит item из done в verified после human acceptance. Не перетирает resolvedById/resolvedAt, чтобы сохранить исполнителя done. Требуется project permission `triage` (admin/owner/manager).',
+        description: 'Переводит item из done в verified после human acceptance. Не перетирает assignee, resolvedById или resolvedAt; переданный comment сохраняется атомарно с переходом. Конкурентное изменение состояния или revision возвращает 409. Требуется project permission `triage` (admin/owner/manager).',
         security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: itemRequestSchema({
+              schema: itemMutationRequestSchema({
                 comment: { type: 'string', maxLength: 5000 },
                 evidence: { $ref: '#/components/schemas/ItemEvidenceInput' },
               }),
@@ -933,6 +973,7 @@ const spec = {
             description: 'Item verified',
             content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Item' } } } } },
           },
+          409: STATUS_CONFLICT_RESPONSE,
           403: { description: 'Недостаточно прав', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           404: { description: 'Item не найден', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
@@ -942,13 +983,13 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Вернуть item на правки',
-        description: 'Переводит item из review/done/verified в changes_requested и добавляет actionable note с expected/actual context. Требуется project permission `triage` (admin/owner/manager).',
+        description: 'Переводит item из review/done/verified в changes_requested, сохраняет assignee и атомарно добавляет actionable note с expected/actual context. Конкурентное изменение состояния или revision возвращает 409. Требуется project permission `triage` (admin/owner/manager).',
         security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: itemRequestSchema({
+              schema: itemMutationRequestSchema({
                 summary: { type: 'string', minLength: 3, maxLength: 2000 },
                 expected: { type: 'string', minLength: 1, maxLength: 2000 },
                 actual: { type: 'string', minLength: 1, maxLength: 2000 },
@@ -964,6 +1005,7 @@ const spec = {
             description: 'Changes requested',
             content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Item' } } } } },
           },
+          409: STATUS_CONFLICT_RESPONSE,
           403: { description: 'Недостаточно прав', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           404: { description: 'Item не найден', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
@@ -973,13 +1015,13 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Переоткрыть item',
-        description: 'Возвращает item из done/verified/cancelled в статус new или сразу in_progress. Требуется project permission `triage` (admin/owner/manager).',
+        description: 'Возвращает item из done/verified/cancelled в статус new с очисткой assignee или сразу в in_progress с явным назначением текущего пользователя. Конкурентное изменение статуса возвращает 409. Требуется project permission `triage` (admin/owner/manager).',
         security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: itemRequestSchema({
+              schema: itemMutationRequestSchema({
                 status: { type: 'string', enum: ['new', 'in_progress'], description: 'Optional target status. Defaults to new. Use in_progress to reopen and assign the item to the caller.' },
                 reason: { type: 'string', enum: ['audit_failed', 'audit_blocked', 'staging_failed', 'regression', 'manual'], description: 'Optional reopen reason for structured history and audit logs.' },
                 auditResult: { type: 'string', enum: ['fail', 'blocked'], description: 'Optional completed-item audit result that caused the reopen.' },
@@ -992,6 +1034,7 @@ const spec = {
             description: 'Item reopened',
             content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Item' } } } } },
           },
+          409: STATUS_CONFLICT_RESPONSE,
           403: { description: 'Недостаточно прав', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           404: { description: 'Item не найден', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
@@ -1001,13 +1044,13 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Обновить item',
-        description: 'Обновляет поля item (itemType, message, priority, labels, assigneeId). Требуется project permission `triage` (admin/owner/manager).',
+        description: 'Обновляет поля item (itemType, message, priority, labels, assigneeId) с revision-aware CAS. Конкурентное изменение item возвращает 409. Требуется project permission `triage` (admin/owner/manager).',
         security: AUTH_SECURITY,
         requestBody: {
           required: true,
           content: {
             'application/json': {
-              schema: itemRequestSchema({
+              schema: itemMutationRequestSchema({
                 itemType: { $ref: '#/components/schemas/ItemType' },
                 message: { type: 'string', minLength: 3 },
                 assigneeId: { type: 'string', format: 'uuid', nullable: true },
@@ -1022,6 +1065,7 @@ const spec = {
             description: 'Item обновлён',
             content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Item' } } } } },
           },
+          409: STATUS_CONFLICT_RESPONSE,
           403: { description: 'Недостаточно прав', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           404: { description: 'Item не найден', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
@@ -1037,7 +1081,7 @@ const spec = {
           required: true,
           content: {
             'application/json': {
-              schema: itemRequestSchema(),
+              schema: itemMutationRequestSchema(),
             },
           },
         },
@@ -1050,6 +1094,7 @@ const spec = {
               },
             },
           },
+          409: STATUS_CONFLICT_RESPONSE,
           403: { description: 'Недостаточно прав', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           404: { description: 'Item не найден', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
@@ -1935,6 +1980,7 @@ const spec = {
         responses: {
           200: { description: 'Error group updated', content: { 'application/json': { schema: { type: 'object', properties: { data: { type: 'object', properties: { errorGroup: { $ref: '#/components/schemas/ErrorGroup' } } } } } } } },
           201: { description: 'Error group created', content: { 'application/json': { schema: { type: 'object', properties: { data: { type: 'object', properties: { errorGroup: { $ref: '#/components/schemas/ErrorGroup' } } } } } } } },
+          409: STATUS_CONFLICT_RESPONSE,
         },
       },
     },

@@ -142,7 +142,7 @@ describe('Middleware', () => {
       const itemId = createBody.data.id;
 
       // Developer member tries to claim it — should fail
-      const res = await post('/claim', { id: itemId }, ctx.developerToken);
+      const res = await post('/claim', { id: itemId, updatedAt: createBody.data.updatedAt }, ctx.developerToken);
       expect(res.status).toBe(403);
     });
   });

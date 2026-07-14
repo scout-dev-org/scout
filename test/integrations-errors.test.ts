@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { integrationsErrorsRoutes } from '../server/routes/integrations-errors.js';
-import { enqueueBridgeJob, getBridgeStatus, processBridgeJobs } from '../server/services/error-groups.js';
+import { enqueueBridgeJob, getBridgeStatus, processBridgeJobs, upsertErrorGroup } from '../server/services/error-groups.js';
 import { createTestContext, type TestContext } from './helpers.js';
 import { apiKeys, auditLog, errorGroupOccurrences, errorGroups, projects, scoutBridgeJobs, scoutItems } from '../server/db/schema.js';
 import { eventBus, type SSEEvent } from '../server/lib/event-bus.js';
@@ -146,6 +146,45 @@ describe('Error integrations routes', () => {
     expect(ctx.db.select().from(errorGroups).all()).toHaveLength(1);
     expect(ctx.db.select().from(scoutItems).all()).toHaveLength(1);
     expect(ctx.db.select().from(scoutItems).get()?.status).toBe('verified');
+  });
+
+  it('concurrent create re-reads the group after acquiring the write lock', async () => {
+    const key = await createApiKey(['errors:write']);
+    const originalTransaction = ctx.db.transaction.bind(ctx.db);
+    vi.spyOn(ctx.db, 'transaction').mockImplementationOnce(((callback: any, config: any) => {
+      upsertErrorGroup({ ...basePayload, projectId: ctx.projectId, sampleRequestId: 'concurrent-winner' }, ctx.projectId);
+      return originalTransaction(callback, config);
+    }) as any);
+
+    const res = await upsert({ ...basePayload, projectId: ctx.projectId, sampleRequestId: 'concurrent-follower' }, key);
+    const body = await res.json() as any;
+
+    expect(res.status).toBe(200);
+    expect(body.data.errorGroup.occurrenceCount).toBe(2);
+    expect(ctx.db.select().from(errorGroups).all()).toHaveLength(1);
+    expect(ctx.db.select().from(scoutItems).all()).toHaveLength(1);
+  });
+
+  it('concurrent upsert uses state and counters read inside the write transaction', async () => {
+    const key = await createApiKey(['errors:write']);
+    const first = await upsert({ ...basePayload, projectId: ctx.projectId }, key);
+    const firstBody = await first.json() as any;
+    const originalTransaction = ctx.db.transaction.bind(ctx.db);
+    vi.spyOn(ctx.db, 'transaction').mockImplementationOnce(((callback: any, config: any) => {
+      ctx.db.update(errorGroups).set({
+        state: 'ignored',
+        ignoredUntil: '2099-01-01T00:00:00.000Z',
+        occurrenceCount: 7,
+      }).where(eq(errorGroups.id, firstBody.data.errorGroup.id)).run();
+      return originalTransaction(callback, config);
+    }) as any);
+
+    const res = await upsert({ ...basePayload, projectId: ctx.projectId, sampleRequestId: 'after-concurrent-update' }, key);
+    const body = await res.json() as any;
+
+    expect(res.status).toBe(200);
+    expect(body.data.errorGroup.state).toBe('ignored');
+    expect(body.data.errorGroup.occurrenceCount).toBe(8);
   });
 
   it('ignored group updates counters without creating a new item', async () => {

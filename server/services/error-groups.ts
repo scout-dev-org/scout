@@ -2,9 +2,10 @@ import { and, count, desc, eq, inArray, lte } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
 import { errorGroupOccurrences, errorGroups, projects, scoutBridgeJobs, scoutItems, type ErrorGroup } from '../db/schema.js';
-import { NotFoundError } from '../lib/errors.js';
+import { ConflictError, NotFoundError } from '../lib/errors.js';
 import { eventBus } from '../lib/event-bus.js';
 import { logAudit } from './audit.js';
+import { isSqliteBusyError, nextItemUpdatedAt, type DbOrTx } from './items.js';
 import { dispatchWebhooks } from './webhooks.js';
 
 type ItemStatusChange = {
@@ -366,17 +367,28 @@ function priorityForSeverity(severity: ErrorUpsertInput['severity']): 'critical'
   return 'medium';
 }
 
+function runImmediateErrorGroupTransaction<T>(operation: (tx: DbOrTx) => T): T {
+  try {
+    return db.transaction((tx) => operation(tx), { behavior: 'immediate' });
+  } catch (error) {
+    if (isSqliteBusyError(error)) {
+      throw new ConflictError('Database is busy with a concurrent write; retry the operation', 'ITEM_STATE_CONFLICT');
+    }
+    throw error;
+  }
+}
+
 export function upsertErrorGroup(input: ErrorUpsertInput, resolvedProjectId?: string): ErrorGroup {
   const projectId = resolvedProjectId ?? resolveErrorProjectId(input);
   const timestamp = input.occurredAt || now();
   const samplePayload = stringifySample(input.samplePayload);
-  const existing = db.select().from(errorGroups)
-    .where(and(eq(errorGroups.projectId, projectId), eq(errorGroups.environment, input.environment), eq(errorGroups.fingerprint, input.fingerprint)))
-    .get();
   const createdLinkedItems: CreatedLinkedItem[] = [];
   const autoAcceptedItemStatusChanges: ItemStatusChange[] = [];
 
-  const group = db.transaction((tx) => {
+  const group = runImmediateErrorGroupTransaction((tx) => {
+    const existing = tx.select().from(errorGroups)
+      .where(and(eq(errorGroups.projectId, projectId), eq(errorGroups.environment, input.environment), eq(errorGroups.fingerprint, input.fingerprint)))
+      .get();
     if (!existing) {
       const itemId = randomUUID();
       tx.insert(scoutItems).values({
@@ -471,7 +483,7 @@ export function upsertErrorGroup(input: ErrorUpsertInput, resolvedProjectId?: st
         resolvedById: null,
         resolutionNote: AUTO_ACCEPTED_RUNTIME_ITEM_NOTE,
         resolvedAt: timestamp,
-        updatedAt: now(),
+        updatedAt: nextItemUpdatedAt(linkedItem.updatedAt),
       }).where(eq(scoutItems.id, linkedItem.id)).run();
       autoAcceptedItemStatusChanges.push({
         item: tx.select().from(scoutItems).where(eq(scoutItems.id, linkedItem.id)).get()!,

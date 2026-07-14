@@ -1,6 +1,6 @@
 import { db } from '../db/client.js';
 import { scoutItems, scoutItemNotes, scoutItemEvidence, type User, type ItemStatus, type ItemPriority, type ItemType, type ItemSource } from '../db/schema.js';
-import { eq, and, isNull, desc } from 'drizzle-orm';
+import { eq, and, isNull, desc, type SQL } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
@@ -11,7 +11,7 @@ import { NotFoundError, ConflictError, ValidationError } from '../lib/errors.js'
 import { logger } from '../lib/logger.js';
 
 // Both db and tx share these methods — use minimal interface
-interface DbOrTx {
+export interface DbOrTx {
   insert: typeof db.insert;
   select: typeof db.select;
   update: typeof db.update;
@@ -20,6 +20,18 @@ interface DbOrTx {
 
 const DONE_EVIDENCE_LEVEL_SET = new Set<ItemEvidenceInput['level']>(DONE_EVIDENCE_LEVELS);
 const RESOLVABLE_ITEM_STATUSES = new Set<ItemStatus>(['new', 'in_progress', 'review', 'changes_requested', 'done']);
+const ITEM_STATE_CONFLICT = {
+  message: 'Item state changed concurrently; refresh and retry',
+  code: 'ITEM_STATE_CONFLICT',
+};
+const CLAIM_CONFLICT = {
+  message: 'Item already claimed or not in "new" status',
+  code: 'CONFLICT',
+};
+
+export type ItemRevisionPrecondition = {
+  updatedAt: string;
+};
 
 const ITEM_DEDUPE_WINDOW_MS = 10 * 60 * 1000;
 const ITEM_DEDUPE_CANDIDATE_LIMIT = 50;
@@ -53,47 +65,94 @@ function addEvidence(
   evidence: ItemEvidenceInput,
 ): string {
   const id = randomUUID();
+  const values = evidenceValues(evidence);
   tx.insert(scoutItemEvidence).values({
     id,
     itemId,
     userId,
-    kind: evidence.kind ?? 'handoff',
-    result: evidence.result,
-    level: evidence.level,
-    coverage: evidence.coverage,
-    environment: evidence.environment,
-    role: evidence.role,
-    url: evidence.url,
-    scenario: evidence.scenario,
-    action: evidence.action,
-    visibleResult: evidence.visibleResult,
-    acceptanceScope: evidence.acceptanceScope,
-    consoleResult: evidence.consoleResult,
-    networkResult: evidence.networkResult,
-    apiResult: evidence.apiResult,
-    dbResult: evidence.dbResult,
-    fixture: evidence.fixture,
-    cleanupResult: evidence.cleanupResult,
-    commitSha: evidence.commitSha,
-    deploySha: evidence.deploySha,
-    risks: evidence.risks,
-    uncheckedRisks: evidence.uncheckedRisks,
-    source: evidence.source,
-    verifiedAt: evidence.verifiedAt,
+    ...values,
     createdAt: now(),
   }).run();
   return id;
 }
 
+function evidenceValues(evidence: ItemEvidenceInput) {
+  return {
+    kind: evidence.kind ?? 'handoff',
+    result: evidence.result ?? null,
+    level: evidence.level ?? null,
+    coverage: evidence.coverage ?? null,
+    environment: evidence.environment,
+    role: evidence.role ?? null,
+    url: evidence.url ?? null,
+    scenario: evidence.scenario,
+    action: evidence.action,
+    visibleResult: evidence.visibleResult,
+    acceptanceScope: evidence.acceptanceScope ?? null,
+    consoleResult: evidence.consoleResult ?? null,
+    networkResult: evidence.networkResult ?? null,
+    apiResult: evidence.apiResult ?? null,
+    dbResult: evidence.dbResult ?? null,
+    fixture: evidence.fixture ?? null,
+    cleanupResult: evidence.cleanupResult ?? null,
+    commitSha: evidence.commitSha ?? null,
+    deploySha: evidence.deploySha ?? null,
+    risks: evidence.risks ?? null,
+    uncheckedRisks: evidence.uncheckedRisks ?? null,
+    source: evidence.source ?? null,
+    verifiedAt: evidence.verifiedAt ?? null,
+  };
+}
+
+function hasMatchingEvidence(
+  tx: DbOrTx,
+  itemId: string,
+  userId: string,
+  evidence: ItemEvidenceInput,
+): boolean {
+  const values = evidenceValues(evidence);
+  const entries = tx.select().from(scoutItemEvidence)
+    .where(and(
+      eq(scoutItemEvidence.itemId, itemId),
+      eq(scoutItemEvidence.userId, userId),
+      eq(scoutItemEvidence.kind, values.kind),
+    ))
+    .all();
+
+  return entries.some((entry) => Object.entries(values).every(
+    ([key, value]) => entry[key as keyof typeof values] === value,
+  ));
+}
+
+function addCommentNote(tx: DbOrTx, itemId: string, userId: string, content: string) {
+  const id = randomUUID();
+  tx.insert(scoutItemNotes).values({
+    id,
+    itemId,
+    userId,
+    content,
+    type: 'comment',
+  }).run();
+  return tx.select().from(scoutItemNotes).where(eq(scoutItemNotes.id, id)).get()!;
+}
+
 function isEvidenceStrongEnough(
   newStatus: ItemStatus,
-  evidence: { result?: ItemEvidenceInput['result'] | null; level?: ItemEvidenceInput['level'] | null; commitSha?: string | null },
+  evidence: {
+    result?: ItemEvidenceInput['result'] | null;
+    level?: ItemEvidenceInput['level'] | null;
+    coverage?: ItemEvidenceInput['coverage'] | null;
+    acceptanceScope?: string | null;
+    commitSha?: string | null;
+  },
 ): boolean {
   if (newStatus !== 'review' && newStatus !== 'done') return true;
   if (evidence.result !== 'pass') return false;
   if (!evidence.level) return false;
   if (newStatus === 'review') return Boolean(evidence.commitSha);
-  return DONE_EVIDENCE_LEVEL_SET.has(evidence.level);
+  return DONE_EVIDENCE_LEVEL_SET.has(evidence.level)
+    && Boolean(evidence.coverage)
+    && Boolean(evidence.acceptanceScope?.trim());
 }
 
 function requireHandoffEvidence(
@@ -106,7 +165,7 @@ function requireHandoffEvidence(
   if (newStatus === 'review') {
     throw new ValidationError('Review requires inline passing structured evidence with a commit SHA', 'REVIEW_EVIDENCE_REQUIRED');
   }
-  throw new ValidationError('Done requires inline passing target-acceptance evidence', 'DONE_EVIDENCE_REQUIRED');
+  throw new ValidationError('Done requires inline passing target-acceptance evidence with coverage and item-specific acceptance scope', 'DONE_EVIDENCE_REQUIRED');
 }
 
 const RRWEB_FULL_SNAPSHOT_TYPE = 2;
@@ -188,6 +247,12 @@ function normalizeDedupeString(value?: string | null): string {
 function parseDbTimestamp(value: string): number {
   if (SQLITE_UTC_TIMESTAMP_RE.test(value)) return Date.parse(`${value.replace(' ', 'T')}Z`);
   return Date.parse(value);
+}
+
+export function nextItemUpdatedAt(previous: string): string {
+  const previousMs = parseDbTimestamp(previous);
+  const nextMs = Number.isNaN(previousMs) ? Date.now() : Math.max(Date.now(), previousMs + 1);
+  return new Date(nextMs).toISOString();
 }
 
 function parseMetadata(metadata: string | null): Record<string, string> {
@@ -296,6 +361,68 @@ export function validateTransition(from: ItemStatus, to: ItemStatus): void {
   }
 }
 
+type ConflictDetails = typeof ITEM_STATE_CONFLICT;
+
+function stateConflict(details: ConflictDetails): ConflictError {
+  return new ConflictError(details.message, details.code);
+}
+
+export function isSqliteBusyError(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('code' in error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && (code.startsWith('SQLITE_BUSY') || code.startsWith('SQLITE_LOCKED'));
+}
+
+function runImmediateItemTransaction<T>(
+  operation: (tx: DbOrTx) => T,
+  conflict: ConflictDetails = ITEM_STATE_CONFLICT,
+): T {
+  try {
+    return db.transaction((tx) => operation(tx), { behavior: 'immediate' });
+  } catch (error) {
+    if (isSqliteBusyError(error)) throw stateConflict(conflict);
+    throw error;
+  }
+}
+
+function getItemForStateTransition(
+  tx: DbOrTx,
+  itemId: string,
+  expected: ItemRevisionPrecondition,
+  conflict: ConflictDetails = ITEM_STATE_CONFLICT,
+) {
+  const item = tx.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get();
+  if (!item) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
+  if (item.updatedAt !== expected.updatedAt) {
+    throw stateConflict(conflict);
+  }
+  return item;
+}
+
+function updateItemWithStateCas(
+  tx: DbOrTx,
+  itemId: string,
+  expected: ItemRevisionPrecondition,
+  updateData: Record<string, unknown>,
+  extraConditions: SQL[] = [],
+  conflict: ConflictDetails = ITEM_STATE_CONFLICT,
+): void {
+  const result = tx.update(scoutItems)
+    .set(updateData)
+    .where(and(
+      eq(scoutItems.id, itemId),
+      eq(scoutItems.updatedAt, expected.updatedAt),
+      ...extraConditions,
+    ))
+    .run();
+
+  if (result.changes === 0) {
+    const item = tx.select({ id: scoutItems.id }).from(scoutItems).where(eq(scoutItems.id, itemId)).get();
+    if (!item) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
+    throw stateConflict(conflict);
+  }
+}
+
 export function createItem(data: {
   projectId: string;
   itemType?: ItemType;
@@ -401,39 +528,25 @@ export function createItem(data: {
   }
 }
 
-export function claimItem(itemId: string, user: User) {
-  const existing = db.select({ itemType: scoutItems.itemType }).from(scoutItems).where(eq(scoutItems.id, itemId)).get();
-  if (!existing) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
-  if (existing.itemType === 'note') {
-    throw new ValidationError('Notes must be converted to tasks before being claimed', 'NOTE_REQUIRES_TRIAGE');
-  }
-
-  return db.transaction((tx) => {
-    // Atomic: only claim if status=new AND unassigned
-    const result = tx.update(scoutItems)
-      .set({
-        status: 'in_progress',
-        assigneeId: user.id,
-        updatedAt: now(),
-      })
-      .where(and(
-        eq(scoutItems.id, itemId),
-        eq(scoutItems.status, 'new'),
-        isNull(scoutItems.assigneeId),
-      ))
-      .run();
-
-    if (result.changes === 0) {
-      const item = tx.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get();
-      if (!item) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
-      throw new ConflictError('Item already claimed or not in "new" status', 'CONFLICT');
+export function claimItem(itemId: string, user: User, expected: ItemRevisionPrecondition) {
+  return runImmediateItemTransaction((tx) => {
+    const item = getItemForStateTransition(tx, itemId, expected);
+    if (item.itemType === 'note') {
+      throw new ValidationError('Notes must be converted to tasks before being claimed', 'NOTE_REQUIRES_TRIAGE');
     }
+    if (item.status !== 'new' || item.assigneeId) throw stateConflict(CLAIM_CONFLICT);
+
+    updateItemWithStateCas(tx, itemId, expected, {
+      status: 'in_progress',
+      assigneeId: user.id,
+      updatedAt: nextItemUpdatedAt(item.updatedAt),
+    }, [eq(scoutItems.status, 'new'), isNull(scoutItems.assigneeId)], CLAIM_CONFLICT);
 
     addAutoNote(tx, itemId, user.id, JSON.stringify({ type: 'assignment', userName: user.name }), 'assignment');
     addAutoNote(tx, itemId, user.id, JSON.stringify({ type: 'status_change', from: 'new', to: 'in_progress' }), 'status_change');
 
     return tx.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get()!;
-  });
+  }, CLAIM_CONFLICT);
 }
 
 type WorkflowCompletionExtra = {
@@ -443,29 +556,47 @@ type WorkflowCompletionExtra = {
   evidence?: ItemEvidenceInput;
 };
 
-export function resolveItem(itemId: string, user: User, extra?: WorkflowCompletionExtra) {
-  const item = db.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get();
-  if (!item) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
-  if (item.itemType === 'note') {
-    throw new ValidationError('Notes must be converted to tasks before workflow transitions', 'NOTE_REQUIRES_TRIAGE');
-  }
+export function resolveItem(itemId: string, user: User, expected: ItemRevisionPrecondition, extra?: WorkflowCompletionExtra) {
+  return runImmediateItemTransaction((tx) => {
+    const item = tx.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get();
+    if (!item) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
+    if (item.itemType === 'note') {
+      throw new ValidationError('Notes must be converted to tasks before workflow transitions', 'NOTE_REQUIRES_TRIAGE');
+    }
 
-  const currentStatus = item.status as ItemStatus;
-  if (!RESOLVABLE_ITEM_STATUSES.has(currentStatus)) {
-    throw new ValidationError(`Invalid status transition: ${currentStatus} → done`, 'INVALID_STATUS_TRANSITION');
-  }
+    const currentStatus = item.status as ItemStatus;
+    const completionEvidence = extra?.evidence
+      ? { ...extra.evidence, kind: 'verification' as const }
+      : undefined;
+    const matchingEvidence = Boolean(completionEvidence)
+      && hasMatchingEvidence(tx, itemId, user.id, completionEvidence!);
+    const statusChanged = currentStatus !== 'done';
+    const referencesChanged = (
+      (extra?.branchName !== undefined && extra.branchName !== item.branchName)
+      || (extra?.mrUrl !== undefined && extra.mrUrl !== item.mrUrl)
+      || (extra?.resolutionNote !== undefined && extra.resolutionNote !== item.resolutionNote)
+    );
+    if (item.updatedAt !== expected.updatedAt) throw stateConflict(ITEM_STATE_CONFLICT);
 
-  if (currentStatus !== 'done' || extra?.evidence) {
-    requireHandoffEvidence(item, 'done', extra?.evidence);
-  }
+    if (!RESOLVABLE_ITEM_STATUSES.has(currentStatus)) {
+      throw new ValidationError(`Invalid status transition: ${currentStatus} → done`, 'INVALID_STATUS_TRANSITION');
+    }
 
-  return db.transaction((tx) => {
-    const updatedAt = now();
+    if (currentStatus !== 'done' || extra?.evidence) {
+      requireHandoffEvidence(item, 'done', extra?.evidence);
+    }
+
+    const shouldAddEvidence = Boolean(completionEvidence) && (
+      currentStatus !== 'done' || !matchingEvidence
+    );
+    const changed = statusChanged || referencesChanged || shouldAddEvidence;
+    if (!changed) return { item, changed: false, statusChanged: false, oldStatus: currentStatus };
+
+    const updatedAt = nextItemUpdatedAt(item.updatedAt);
     const updateData: Record<string, unknown> = { updatedAt };
 
-    if (currentStatus !== 'done') {
+    if (statusChanged) {
       updateData.status = 'done';
-      updateData.assigneeId = user.id;
       updateData.resolvedById = user.id;
       updateData.resolvedAt = updatedAt;
     }
@@ -474,17 +605,19 @@ export function resolveItem(itemId: string, user: User, extra?: WorkflowCompleti
     if (extra?.mrUrl !== undefined) updateData.mrUrl = extra.mrUrl;
     if (extra?.resolutionNote !== undefined) updateData.resolutionNote = extra.resolutionNote;
 
-    tx.update(scoutItems).set(updateData).where(eq(scoutItems.id, itemId)).run();
-    if (extra?.evidence) addEvidence(tx, itemId, user.id, { ...extra.evidence, kind: 'verification' });
+    updateItemWithStateCas(tx, itemId, expected, updateData);
+    if (shouldAddEvidence) addEvidence(tx, itemId, user.id, completionEvidence!);
 
-    if (currentStatus !== 'done') {
-      if (item.assigneeId !== user.id) {
-        addAutoNote(tx, itemId, user.id, JSON.stringify({ type: 'assignment', userName: user.name }), 'assignment');
-      }
+    if (statusChanged) {
       addAutoNote(tx, itemId, user.id, JSON.stringify({ type: 'status_change', from: currentStatus, to: 'done' }), 'status_change');
     }
 
-    return tx.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get()!;
+    return {
+      item: tx.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get()!,
+      changed: true,
+      statusChanged,
+      oldStatus: currentStatus,
+    };
   });
 }
 
@@ -492,27 +625,32 @@ export function updateItemStatus(
   itemId: string,
   newStatus: ItemStatus,
   user: User,
+  expected: ItemRevisionPrecondition,
   extra?: {
     branchName?: string;
     mrUrl?: string;
     attemptCount?: number;
     resolutionNote?: string;
     evidence?: ItemEvidenceInput;
+    comment?: string;
   },
 ) {
-  const item = db.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get();
-  if (!item) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
-  if (item.itemType === 'note' && newStatus !== 'cancelled') {
-    throw new ValidationError('Notes must be converted to tasks before workflow transitions', 'NOTE_REQUIRES_TRIAGE');
-  }
+  return runImmediateItemTransaction((tx) => {
+    const item = getItemForStateTransition(tx, itemId, expected);
+    if (item.itemType === 'note' && newStatus !== 'cancelled') {
+      throw new ValidationError('Notes must be converted to tasks before workflow transitions', 'NOTE_REQUIRES_TRIAGE');
+    }
 
-  validateTransition(item.status as ItemStatus, newStatus);
-  requireHandoffEvidence(item, newStatus, extra?.evidence);
+    if (item.status === 'new' && newStatus === 'in_progress') {
+      throw new ValidationError('Use /items/claim to start work on a new item', 'DEDICATED_CLAIM_ENDPOINT_REQUIRED');
+    }
+    validateTransition(item.status as ItemStatus, newStatus);
+    requireHandoffEvidence(item, newStatus, extra?.evidence);
 
-  return db.transaction((tx) => {
+    const updatedAt = nextItemUpdatedAt(item.updatedAt);
     const updateData: Record<string, unknown> = {
       status: newStatus,
-      updatedAt: now(),
+      updatedAt,
     };
 
     if (extra?.branchName !== undefined) updateData.branchName = extra.branchName;
@@ -522,7 +660,7 @@ export function updateItemStatus(
 
     if (newStatus === 'done') {
       updateData.resolvedById = user.id;
-      updateData.resolvedAt = now();
+      updateData.resolvedAt = updatedAt;
     }
 
     if (newStatus === 'new') {
@@ -536,11 +674,16 @@ export function updateItemStatus(
       updateData.resolvedAt = null;
     }
 
-    tx.update(scoutItems).set(updateData).where(eq(scoutItems.id, itemId)).run();
+    updateItemWithStateCas(tx, itemId, expected, updateData);
     if (extra?.evidence) addEvidence(tx, itemId, user.id, extra.evidence);
     addAutoNote(tx, itemId, user.id, JSON.stringify({ type: 'status_change', from: item.status, to: newStatus }), 'status_change');
+    const note = extra?.comment ? addCommentNote(tx, itemId, user.id, extra.comment) : null;
 
-    return tx.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get()!;
+    return {
+      item: tx.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get()!,
+      note,
+      oldStatus: item.status,
+    };
   });
 }
 
@@ -560,22 +703,20 @@ export function updateItem(itemId: string, data: {
   assigneeId?: string | null;
   priority?: ItemPriority;
   labels?: string[];
-}, user?: User) {
-  const item = db.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get();
-  if (!item) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
+}, expected: ItemRevisionPrecondition, user?: User) {
+  return runImmediateItemTransaction((tx) => {
+    const item = getItemForStateTransition(tx, itemId, expected);
+    const updates: Record<string, unknown> = { updatedAt: nextItemUpdatedAt(item.updatedAt) };
+    const nextItemType = data.itemType ?? item.itemType;
+    if (data.itemType !== undefined) updates.itemType = data.itemType;
+    if (data.message !== undefined) updates.message = data.message;
+    if (data.assigneeId !== undefined) updates.assigneeId = data.assigneeId;
+    if (nextItemType === 'note') updates.priority = null;
+    else if (data.priority !== undefined) updates.priority = data.priority;
+    else if (data.itemType !== undefined && item.priority === null) updates.priority = 'medium';
+    if (data.labels !== undefined) updates.labels = JSON.stringify(data.labels);
 
-  const updates: Record<string, unknown> = { updatedAt: now() };
-  const nextItemType = data.itemType ?? item.itemType;
-  if (data.itemType !== undefined) updates.itemType = data.itemType;
-  if (data.message !== undefined) updates.message = data.message;
-  if (data.assigneeId !== undefined) updates.assigneeId = data.assigneeId;
-  if (nextItemType === 'note') updates.priority = null;
-  else if (data.priority !== undefined) updates.priority = data.priority;
-  else if (data.itemType !== undefined && item.priority === null) updates.priority = 'medium';
-  if (data.labels !== undefined) updates.labels = JSON.stringify(data.labels);
-
-  return db.transaction((tx) => {
-    tx.update(scoutItems).set(updates).where(eq(scoutItems.id, itemId)).run();
+    updateItemWithStateCas(tx, itemId, expected, updates);
     if (user && data.itemType !== undefined && item.itemType !== data.itemType) {
       addAutoNote(tx, itemId, user.id, JSON.stringify({ type: 'type_change', from: item.itemType, to: data.itemType }), 'type_change');
     }
@@ -586,28 +727,28 @@ export function updateItem(itemId: string, data: {
 export function reopenItem(
   itemId: string,
   user: User,
+  expected: ItemRevisionPrecondition,
   targetStatus: Extract<ItemStatus, 'new' | 'in_progress'> = 'new',
   extra?: {
     reason?: 'audit_failed' | 'audit_blocked' | 'staging_failed' | 'regression' | 'manual';
     auditResult?: 'fail' | 'blocked';
   },
 ) {
-  const item = db.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get();
-  if (!item) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
-  if (item.itemType === 'note' && targetStatus !== 'new') {
-    throw new ValidationError('Notes must be converted to tasks before workflow transitions', 'NOTE_REQUIRES_TRIAGE');
-  }
+  return runImmediateItemTransaction((tx) => {
+    const item = getItemForStateTransition(tx, itemId, expected);
+    if (item.itemType === 'note' && targetStatus !== 'new') {
+      throw new ValidationError('Notes must be converted to tasks before workflow transitions', 'NOTE_REQUIRES_TRIAGE');
+    }
 
-  validateTransition(item.status as ItemStatus, 'new');
+    validateTransition(item.status as ItemStatus, 'new');
 
-  return db.transaction((tx) => {
-    tx.update(scoutItems).set({
+    updateItemWithStateCas(tx, itemId, expected, {
       status: targetStatus,
       assigneeId: targetStatus === 'in_progress' ? user.id : null,
       resolvedById: null,
       resolvedAt: null,
-      updatedAt: now(),
-    }).where(eq(scoutItems.id, itemId)).run();
+      updatedAt: nextItemUpdatedAt(item.updatedAt),
+    });
 
     addAutoNote(
       tx,
@@ -623,16 +764,22 @@ export function reopenItem(
       'status_change',
     );
 
-    return tx.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get()!;
+    return {
+      item: tx.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get()!,
+      oldStatus: item.status,
+    };
   });
 }
 
-export function deleteItem(itemId: string): void {
-  const item = db.select().from(scoutItems).where(eq(scoutItems.id, itemId)).get();
-  if (!item) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
-
-  // Delete from DB first — if this fails, files remain (can be cleaned up later)
-  db.delete(scoutItems).where(eq(scoutItems.id, itemId)).run();
+export function deleteItem(itemId: string, expected: ItemRevisionPrecondition): void {
+  const item = runImmediateItemTransaction((tx) => {
+    const current = getItemForStateTransition(tx, itemId, expected);
+    const result = tx.delete(scoutItems)
+      .where(and(eq(scoutItems.id, itemId), eq(scoutItems.updatedAt, expected.updatedAt)))
+      .run();
+    if (result.changes === 0) throw stateConflict(ITEM_STATE_CONFLICT);
+    return current;
+  });
 
   // Clean up files after successful DB delete
   deleteFile(item.screenshotPath);

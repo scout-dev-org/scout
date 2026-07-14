@@ -6,7 +6,7 @@ import { ITEM_STATUSES, scoutItems, scoutItemNotes, scoutItemEvidence, scoutItem
 import { authMiddleware } from '../middleware/auth.js';
 import { checkProjectAccess, hasProjectPermission, requireProjectPermission } from '../middleware/permissions.js';
 import { randomUUID } from 'node:crypto';
-import { NotFoundError, ForbiddenError, ValidationError } from '../lib/errors.js';
+import { NotFoundError, ForbiddenError, ConflictError } from '../lib/errors.js';
 import {
   createItemSchema, listItemsSchema, getItemSchema,
   countItemsSchema, claimItemSchema, resolveItemSchema,
@@ -105,14 +105,6 @@ function normalizeLinkPair(sourceItemId: string, targetItemId: string, type: Sco
   return sourceItemId < targetItemId
     ? { sourceItemId, targetItemId, type }
     : { sourceItemId: targetItemId, targetItemId: sourceItemId, type };
-}
-
-function addCommentNote(itemId: string, userId: string, content: string) {
-  const id = randomUUID();
-  db.insert(scoutItemNotes).values({
-    id, itemId, userId, content, type: 'comment',
-  }).run();
-  return db.select().from(scoutItemNotes).where(eq(scoutItemNotes.id, id)).get()!;
 }
 
 function formatRequestChangesNote(data: { summary: string; expected: string; actual: string; steps?: string; url?: string }) {
@@ -267,7 +259,7 @@ export const itemRoutes = new Hono()
   .post('/claim',
     zValidator('json', claimItemSchema),
     async (c) => {
-      const { id } = c.req.valid('json');
+      const { id, updatedAt } = c.req.valid('json');
       const user = c.get('user');
 
       // Check project access via item's projectId
@@ -275,7 +267,7 @@ export const itemRoutes = new Hono()
       if (!existing) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
       requireProjectPermission(user.id, user.role, existing.projectId, 'workflow', c.get('apiKey'));
 
-      const item = claimItem(id, user);
+      const item = claimItem(id, user, { updatedAt });
       logAudit({ userId: user.id, action: 'claim_item', entityType: 'item', entityId: id, ipAddress: getClientIp(c) });
       dispatchWebhooks(existing.projectId, 'item.assigned', { item, assignee: { id: user.id, name: user.name, email: user.email } }).catch(() => {});
       eventBus.publish({ type: 'item.assigned', projectId: existing.projectId, payload: { item } });
@@ -286,30 +278,24 @@ export const itemRoutes = new Hono()
   .post('/resolve',
     zValidator('json', resolveItemSchema),
     async (c) => {
-      const { id, resolutionNote, branchName, mrUrl, evidence } = c.req.valid('json');
+      const { id, updatedAt, resolutionNote, branchName, mrUrl, evidence } = c.req.valid('json');
       const user = c.get('user');
 
       // Check project access via item's projectId
-      const existing = db.select({
-        projectId: scoutItems.projectId,
-        status: scoutItems.status,
-        assigneeId: scoutItems.assigneeId,
-      }).from(scoutItems).where(eq(scoutItems.id, id)).get();
+      const existing = db.select({ projectId: scoutItems.projectId }).from(scoutItems).where(eq(scoutItems.id, id)).get();
       if (!existing) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
       requireProjectPermission(user.id, user.role, existing.projectId, 'workflow', c.get('apiKey'));
 
-      const oldStatus = existing.status;
-      const item = resolveItem(id, user, {
+      const result = resolveItem(id, user, { updatedAt }, {
         resolutionNote, branchName, mrUrl, evidence,
       });
+      const { item } = result;
       logAudit({ userId: user.id, action: 'resolve_item', entityType: 'item', entityId: id, details: { branchName, mrUrl }, ipAddress: getClientIp(c) });
-      if (oldStatus !== 'done') {
-        if (existing.assigneeId !== user.id) {
-          dispatchWebhooks(existing.projectId, 'item.assigned', { item, assignee: { id: user.id, name: user.name, email: user.email } }).catch(() => {});
-          eventBus.publish({ type: 'item.assigned', projectId: existing.projectId, payload: { item } });
-        }
-        dispatchWebhooks(existing.projectId, 'item.status_changed', { item, oldStatus, newStatus: 'done' }).catch(() => {});
-        eventBus.publish({ type: 'item.status_changed', projectId: existing.projectId, payload: { item, oldStatus, newStatus: 'done' } });
+      if (result.statusChanged) {
+        dispatchWebhooks(existing.projectId, 'item.status_changed', { item, oldStatus: result.oldStatus, newStatus: 'done' }).catch(() => {});
+        eventBus.publish({ type: 'item.status_changed', projectId: existing.projectId, payload: { item, oldStatus: result.oldStatus, newStatus: 'done' } });
+      } else if (result.changed) {
+        eventBus.publish({ type: 'item.updated', projectId: existing.projectId, payload: { item } });
       }
       return c.json({ data: item });
     })
@@ -318,19 +304,23 @@ export const itemRoutes = new Hono()
   .post('/cancel',
     zValidator('json', cancelItemSchema),
     async (c) => {
-      const { id } = c.req.valid('json');
+      const { id, updatedAt } = c.req.valid('json');
       const user = c.get('user');
 
       // Check project access via item's projectId
       const existing = db.select().from(scoutItems).where(eq(scoutItems.id, id)).get();
       if (!existing) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
-      const canCancelOwnNew = existing.status === 'new' && existing.reporterId === user.id && hasProjectPermission(user.id, user.role, existing.projectId, 'comment', c.get('apiKey'));
+      const canAttemptOwnCancel = existing.reporterId === user.id
+        && hasProjectPermission(user.id, user.role, existing.projectId, 'comment', c.get('apiKey'));
+      if (canAttemptOwnCancel && existing.updatedAt !== updatedAt) {
+        throw new ConflictError('Item state changed concurrently; refresh and retry', 'ITEM_STATE_CONFLICT');
+      }
+      const canCancelOwnNew = existing.status === 'new' && canAttemptOwnCancel;
       if (!canCancelOwnNew) {
         requireProjectPermission(user.id, user.role, existing.projectId, 'triage', c.get('apiKey'));
       }
 
-      const oldStatus = db.select({ status: scoutItems.status }).from(scoutItems).where(eq(scoutItems.id, id)).get()?.status ?? 'new';
-      const item = updateItemStatus(id, 'cancelled', user);
+      const { item, oldStatus } = updateItemStatus(id, 'cancelled', user, { updatedAt });
       logAudit({ userId: user.id, action: 'cancel_item', entityType: 'item', entityId: id, ipAddress: getClientIp(c) });
       dispatchWebhooks(existing.projectId, 'item.status_changed', { item, oldStatus, newStatus: 'cancelled' }).catch(() => {});
       eventBus.publish({ type: 'item.status_changed', projectId: existing.projectId, payload: { item, oldStatus, newStatus: 'cancelled' } });
@@ -341,24 +331,20 @@ export const itemRoutes = new Hono()
   .post('/update-status',
     zValidator('json', updateItemStatusSchema),
     async (c) => {
-      const { id, status, branchName, mrUrl, attemptCount, evidence } = c.req.valid('json');
+      const { id, updatedAt, status, branchName, mrUrl, attemptCount, evidence } = c.req.valid('json');
       const user = c.get('user');
 
       // Check project access via item's projectId
-      const existing = db.select({ projectId: scoutItems.projectId, status: scoutItems.status }).from(scoutItems).where(eq(scoutItems.id, id)).get();
+      const existing = db.select({ projectId: scoutItems.projectId }).from(scoutItems).where(eq(scoutItems.id, id)).get();
       if (!existing) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
       requireProjectPermission(user.id, user.role, existing.projectId, 'workflow', c.get('apiKey'));
 
-      if (existing.status === 'new' && status === 'in_progress') {
-        throw new ValidationError('Use /items/claim to start work on a new item', 'DEDICATED_CLAIM_ENDPOINT_REQUIRED');
-      }
-
-      const item = updateItemStatus(id, status, user, {
+      const { item, oldStatus } = updateItemStatus(id, status, user, { updatedAt }, {
         branchName, mrUrl, attemptCount, evidence,
       });
       logAudit({ userId: user.id, action: 'update_status', entityType: 'item', entityId: id, details: { status }, ipAddress: getClientIp(c) });
-      dispatchWebhooks(existing.projectId, 'item.status_changed', { item, oldStatus: existing.status, newStatus: status }).catch(() => {});
-      eventBus.publish({ type: 'item.status_changed', projectId: existing.projectId, payload: { item, oldStatus: existing.status, newStatus: status } });
+      dispatchWebhooks(existing.projectId, 'item.status_changed', { item, oldStatus, newStatus: status }).catch(() => {});
+      eventBus.publish({ type: 'item.status_changed', projectId: existing.projectId, payload: { item, oldStatus, newStatus: status } });
       return c.json({ data: item });
     })
 
@@ -366,21 +352,26 @@ export const itemRoutes = new Hono()
   .post('/verify',
     zValidator('json', verifyItemSchema),
     async (c) => {
-      const { id, comment, evidence } = c.req.valid('json');
+      const { id, updatedAt, comment, evidence } = c.req.valid('json');
       const user = c.get('user');
 
-      const existing = db.select({ projectId: scoutItems.projectId, status: scoutItems.status }).from(scoutItems).where(eq(scoutItems.id, id)).get();
+      const existing = db.select({ projectId: scoutItems.projectId }).from(scoutItems).where(eq(scoutItems.id, id)).get();
       if (!existing) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
       requireProjectPermission(user.id, user.role, existing.projectId, 'triage', c.get('apiKey'));
 
-      const item = updateItemStatus(id, 'verified', user, { evidence });
       const trimmedComment = comment?.trim();
-      const note = trimmedComment ? addCommentNote(id, user.id, trimmedComment) : null;
+      const { item, note, oldStatus } = updateItemStatus(
+        id,
+        'verified',
+        user,
+        { updatedAt },
+        { evidence, comment: trimmedComment || undefined },
+      );
 
       logAudit({ userId: user.id, action: 'verify_item', entityType: 'item', entityId: id, ipAddress: getClientIp(c) });
-      dispatchWebhooks(existing.projectId, 'item.status_changed', { item, oldStatus: existing.status, newStatus: 'verified' }).catch(() => {});
+      dispatchWebhooks(existing.projectId, 'item.status_changed', { item, oldStatus, newStatus: 'verified' }).catch(() => {});
       if (note) dispatchWebhooks(existing.projectId, 'item.commented', { item, note }).catch(() => {});
-      eventBus.publish({ type: 'item.status_changed', projectId: existing.projectId, payload: { item, oldStatus: existing.status, newStatus: 'verified' } });
+      eventBus.publish({ type: 'item.status_changed', projectId: existing.projectId, payload: { item, oldStatus, newStatus: 'verified' } });
       if (note) eventBus.publish({ type: 'item.commented', projectId: existing.projectId, payload: { itemId: id } });
       return c.json({ data: enrichItem(item) });
     })
@@ -389,20 +380,25 @@ export const itemRoutes = new Hono()
   .post('/request-changes',
     zValidator('json', requestChangesItemSchema),
     async (c) => {
-      const { id, summary, expected, actual, steps, url, evidence } = c.req.valid('json');
+      const { id, updatedAt, summary, expected, actual, steps, url, evidence } = c.req.valid('json');
       const user = c.get('user');
 
-      const existing = db.select({ projectId: scoutItems.projectId, status: scoutItems.status }).from(scoutItems).where(eq(scoutItems.id, id)).get();
+      const existing = db.select({ projectId: scoutItems.projectId }).from(scoutItems).where(eq(scoutItems.id, id)).get();
       if (!existing) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
       requireProjectPermission(user.id, user.role, existing.projectId, 'triage', c.get('apiKey'));
 
-      const item = updateItemStatus(id, 'changes_requested', user, { evidence });
-      const note = addCommentNote(id, user.id, formatRequestChangesNote({ summary, expected, actual, steps, url }));
+      const { item, note, oldStatus } = updateItemStatus(
+        id,
+        'changes_requested',
+        user,
+        { updatedAt },
+        { evidence, comment: formatRequestChangesNote({ summary, expected, actual, steps, url }) },
+      );
 
       logAudit({ userId: user.id, action: 'request_changes', entityType: 'item', entityId: id, details: { summary }, ipAddress: getClientIp(c) });
-      dispatchWebhooks(existing.projectId, 'item.status_changed', { item, oldStatus: existing.status, newStatus: 'changes_requested' }).catch(() => {});
+      dispatchWebhooks(existing.projectId, 'item.status_changed', { item, oldStatus, newStatus: 'changes_requested' }).catch(() => {});
       dispatchWebhooks(existing.projectId, 'item.commented', { item, note }).catch(() => {});
-      eventBus.publish({ type: 'item.status_changed', projectId: existing.projectId, payload: { item, oldStatus: existing.status, newStatus: 'changes_requested' } });
+      eventBus.publish({ type: 'item.status_changed', projectId: existing.projectId, payload: { item, oldStatus, newStatus: 'changes_requested' } });
       eventBus.publish({ type: 'item.commented', projectId: existing.projectId, payload: { itemId: id } });
       return c.json({ data: enrichItem(item) });
     })
@@ -411,7 +407,7 @@ export const itemRoutes = new Hono()
   .post('/delete',
     zValidator('json', deleteItemSchema),
     async (c) => {
-      const { id } = c.req.valid('json');
+      const { id, updatedAt } = c.req.valid('json');
       const user = c.get('user');
 
       // Check project access via item's projectId
@@ -419,7 +415,7 @@ export const itemRoutes = new Hono()
       if (!existing) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
       requireProjectPermission(user.id, user.role, existing.projectId, 'triage', c.get('apiKey'));
 
-      deleteItem(id);
+      deleteItem(id, { updatedAt });
       logAudit({ userId: user.id, action: 'delete_item', entityType: 'item', entityId: id, ipAddress: getClientIp(c) });
       dispatchWebhooks(existing.projectId, 'item.deleted', { itemId: id }).catch(() => {});
       eventBus.publish({ type: 'item.deleted', projectId: existing.projectId, payload: { itemId: id } });
@@ -444,7 +440,7 @@ export const itemRoutes = new Hono()
         assigneeId: data.assigneeId,
         priority: data.priority,
         labels: data.labels,
-      }, user);
+      }, { updatedAt: data.updatedAt }, user);
       logAudit({ userId: user.id, action: 'update_item', entityType: 'item', entityId: data.id, details: { itemType: data.itemType, message: data.message, priority: data.priority, labels: data.labels }, ipAddress: getClientIp(c) });
       eventBus.publish({ type: 'item.updated', projectId: existing.projectId, payload: { item } });
       return c.json({ data: enrichItem(item) });
@@ -454,7 +450,7 @@ export const itemRoutes = new Hono()
   .post('/reopen',
     zValidator('json', reopenItemSchema),
     async (c) => {
-      const { id, status, reason, auditResult } = c.req.valid('json');
+      const { id, updatedAt, status, reason, auditResult } = c.req.valid('json');
       const user = c.get('user');
 
       // Check project access via item's projectId
@@ -462,9 +458,8 @@ export const itemRoutes = new Hono()
       if (!existing) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
       requireProjectPermission(user.id, user.role, existing.projectId, 'triage', c.get('apiKey'));
 
-      const oldStatus = db.select({ status: scoutItems.status }).from(scoutItems).where(eq(scoutItems.id, id)).get()?.status ?? 'done';
       const newStatus: 'new' | 'in_progress' = status ?? 'new';
-      const item = reopenItem(id, user, newStatus, { reason, auditResult });
+      const { item, oldStatus } = reopenItem(id, user, { updatedAt }, newStatus, { reason, auditResult });
       logAudit({ userId: user.id, action: 'reopen_item', entityType: 'item', entityId: id, details: { status: newStatus, reason, auditResult }, ipAddress: getClientIp(c) });
       dispatchWebhooks(existing.projectId, 'item.status_changed', { item, oldStatus, newStatus }).catch(() => {});
       eventBus.publish({ type: 'item.status_changed', projectId: existing.projectId, payload: { item, oldStatus, newStatus } });

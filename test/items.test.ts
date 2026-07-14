@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import { itemRoutes } from '../server/routes/items.js';
-import { projects, scoutItemEvidence, scoutItems } from '../server/db/schema.js';
+import { projects, scoutItemEvidence, scoutItemNotes, scoutItems } from '../server/db/schema.js';
 import { createTestContext, type TestContext } from './helpers.js';
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
+import { eventBus, type SSEEvent } from '../server/lib/event-bus.js';
 
 // Mock the db module
 vi.mock('../server/db/client.js', async () => {
@@ -14,6 +15,10 @@ vi.mock('../server/db/client.js', async () => {
 describe('Items routes', () => {
   let ctx: TestContext;
   let app: Hono;
+  const revisionMutationPaths = new Set([
+    '/claim', '/resolve', '/cancel', '/update-status', '/verify',
+    '/request-changes', '/delete', '/update', '/reopen',
+  ]);
 
   beforeEach(async () => {
     ctx = createTestContext();
@@ -24,7 +29,7 @@ describe('Items routes', () => {
     app.route('/api/items', itemRoutes);
   });
 
-  function post(path: string, body: unknown, token: string) {
+  function rawPost(path: string, body: unknown, token: string) {
     return app.request(`/api/items${path}`, {
       method: 'POST',
       headers: {
@@ -33,6 +38,18 @@ describe('Items routes', () => {
       },
       body: JSON.stringify(body),
     });
+  }
+
+  function post(path: string, body: unknown, token: string) {
+    if (!revisionMutationPaths.has(path) || !body || typeof body !== 'object' || Array.isArray(body)) {
+      return rawPost(path, body, token);
+    }
+    const input = body as Record<string, unknown>;
+    if (Object.hasOwn(input, 'updatedAt')) return rawPost(path, body, token);
+    const item = typeof input.id === 'string'
+      ? ctx.db.select().from(scoutItems).where(eq(scoutItems.id, input.id)).get()
+      : null;
+    return rawPost(path, { ...input, updatedAt: item?.updatedAt ?? 'missing-item-revision' }, token);
   }
 
   async function createTestItem(token?: string, projectId = ctx.projectId) {
@@ -230,6 +247,13 @@ describe('Items routes', () => {
 
   // === CLAIM ===
 
+  it('item mutations require a client-observed updatedAt revision', async () => {
+    const item = await createTestItem();
+    const res = await rawPost('/claim', { id: item.id }, ctx.developerToken);
+
+    expect(res.status).toBe(400);
+  });
+
   it('POST /claim — developer member claims new item', async () => {
     const item = await createTestItem();
 
@@ -274,7 +298,7 @@ describe('Items routes', () => {
     expect(body.data.resolutionNote).toBe('Fixed the button handler');
   });
 
-  it('POST /resolve — from new to done with strong evidence', async () => {
+  it('POST /resolve — from new to done preserves unassigned ownership', async () => {
     const item = await createTestItem();
     const res = await post('/resolve', {
       id: item.id,
@@ -286,7 +310,7 @@ describe('Items routes', () => {
     expect(res.status).toBe(200);
     const body = await res.json() as any;
     expect(body.data.status).toBe('done');
-    expect(body.data.assigneeId).toBe(ctx.developerId);
+    expect(body.data.assigneeId).toBeNull();
     expect(body.data.resolvedById).toBe(ctx.developerId);
     expect(body.data.resolutionNote).toBe('Completed from new with target evidence');
   });
@@ -325,6 +349,42 @@ describe('Items routes', () => {
     expect(res.status).toBe(400);
   });
 
+  it('POST /resolve — rejects blank required evidence fields', async () => {
+    const item = await createTestItem();
+
+    for (const field of ['environment', 'scenario', 'action', 'visibleResult', 'acceptanceScope']) {
+      const res = await post('/resolve', {
+        id: item.id,
+        evidence: testEvidence({ [field]: '   ' }),
+      }, ctx.developerToken);
+      expect(res.status, field).toBe(400);
+    }
+  });
+
+  it('POST /resolve — trims required evidence fields before storing them', async () => {
+    const item = await createTestItem();
+    const res = await post('/resolve', {
+      id: item.id,
+      evidence: testEvidence({
+        environment: '  local  ',
+        scenario: '  Checked the item path  ',
+        action: '  Submitted the form  ',
+        visibleResult: '  Success state is visible  ',
+        acceptanceScope: '  Item-specific form submission  ',
+      }),
+    }, ctx.developerToken);
+
+    expect(res.status).toBe(200);
+    const stored = ctx.db.select().from(scoutItemEvidence).where(eq(scoutItemEvidence.itemId, item.id)).get();
+    expect(stored).toMatchObject({
+      environment: 'local',
+      scenario: 'Checked the item path',
+      action: 'Submitted the form',
+      visibleResult: 'Success state is visible',
+      acceptanceScope: 'Item-specific form submission',
+    });
+  });
+
   it('POST /resolve — from changes_requested to done with strong evidence', async () => {
     const item = await createTestItem();
     await resolveTestItem(item.id);
@@ -346,20 +406,151 @@ describe('Items routes', () => {
     expect(body.data.resolvedById).toBe(ctx.developerId);
   });
 
-  it('POST /resolve — already done is idempotent', async () => {
+  it('POST /resolve — stale review modal cannot override requested changes', async () => {
     const item = await createTestItem();
-    await resolveTestItem(item.id, ctx.developerToken, { resolutionNote: 'First completion' });
+    await post('/claim', { id: item.id }, ctx.developerToken);
+    const reviewRes = await post('/update-status', {
+      id: item.id,
+      status: 'review',
+      evidence: testEvidence({ scenario: 'Open completion from review' }),
+    }, ctx.developerToken);
+    const review = await reviewRes.json() as any;
+
+    await post('/request-changes', {
+      id: item.id,
+      summary: 'Concurrent review rejection',
+      expected: 'The completion modal must become stale',
+      actual: 'A reviewer requested changes',
+    }, ctx.adminToken);
+
+    const staleResolve = await post('/resolve', {
+      id: item.id,
+      updatedAt: review.data.updatedAt,
+      evidence: testEvidence({ scenario: 'Stale completion modal submission' }),
+    }, ctx.developerToken);
+
+    expect(staleResolve.status).toBe(409);
+    expect(await staleResolve.text()).toContain('Item state changed concurrently');
+    expect(ctx.db.select().from(scoutItems).where(eq(scoutItems.id, item.id)).get()?.status).toBe('changes_requested');
+  });
+
+  it('POST /resolve — stale request conflicts after another actor completes the item', async () => {
+    const item = await createTestItem();
+    const completion = await post('/resolve', {
+      id: item.id,
+      updatedAt: item.updatedAt,
+      evidence: testEvidence({ scenario: 'Another actor completes the item' }),
+    }, ctx.adminToken);
+    expect(completion.status).toBe(200);
+
+    const staleResolve = await post('/resolve', {
+      id: item.id,
+      updatedAt: item.updatedAt,
+    }, ctx.developerToken);
+
+    expect(staleResolve.status).toBe(409);
+    expect(await staleResolve.text()).toContain('Item state changed concurrently');
+    expect(ctx.db.select().from(scoutItemEvidence).where(eq(scoutItemEvidence.itemId, item.id)).all()).toHaveLength(1);
+  });
+
+  it('POST /resolve — only current-revision done retries dedupe identical evidence', async () => {
+    const item = await createTestItem();
+    const evidence = testEvidence({ scenario: 'Stable completion evidence' });
+    const firstRes = await post('/resolve', {
+      id: item.id,
+      resolutionNote: 'First completion',
+      evidence,
+    }, ctx.developerToken);
+    expect(firstRes.status).toBe(200);
+    const first = await firstRes.json() as any;
+    expect(ctx.db.select().from(scoutItemEvidence).where(eq(scoutItemEvidence.itemId, item.id)).all()).toHaveLength(1);
+
+    const events: SSEEvent[] = [];
+    const unsubscribe = eventBus.subscribe((event) => events.push(event));
 
     const res = await post('/resolve', {
       id: item.id,
-      resolutionNote: 'Retry completion',
-      evidence: testEvidence({ scenario: 'Retry resolve for already done item' }),
+      updatedAt: item.updatedAt,
+      resolutionNote: 'First completion',
+      evidence,
     }, ctx.developerToken);
 
-    expect(res.status).toBe(200);
-    const body = await res.json() as any;
+    expect(res.status).toBe(409);
+    expect(await res.text()).toContain('Item state changed concurrently');
+    expect(ctx.db.select().from(scoutItemEvidence).where(eq(scoutItemEvidence.itemId, item.id)).all()).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'item.updated')).toHaveLength(0);
+
+    const currentRetry = await post('/resolve', {
+      id: item.id,
+      updatedAt: first.data.updatedAt,
+      resolutionNote: 'First completion',
+      evidence,
+    }, ctx.developerToken);
+
+    expect(currentRetry.status).toBe(200);
+    const body = await currentRetry.json() as any;
     expect(body.data.status).toBe('done');
-    expect(body.data.resolutionNote).toBe('Retry completion');
+    expect(body.data.updatedAt).toBe(first.data.updatedAt);
+    expect(ctx.db.select().from(scoutItemEvidence).where(eq(scoutItemEvidence.itemId, item.id)).all()).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'item.updated')).toHaveLength(0);
+
+    const changedNote = await post('/resolve', {
+      id: item.id,
+      resolutionNote: 'Updated completion note',
+      evidence,
+    }, ctx.developerToken);
+    expect(changedNote.status).toBe(200);
+    const changedNoteBody = await changedNote.json() as any;
+    expect(changedNoteBody.data.updatedAt).not.toBe(first.data.updatedAt);
+    expect(ctx.db.select().from(scoutItemEvidence).where(eq(scoutItemEvidence.itemId, item.id)).all()).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'item.updated')).toHaveLength(1);
+
+    const changedEvidence = await post('/resolve', {
+      id: item.id,
+      resolutionNote: 'Updated completion note',
+      evidence: testEvidence({ scenario: 'New completion evidence' }),
+    }, ctx.developerToken);
+    unsubscribe();
+
+    expect(changedEvidence.status).toBe(200);
+    expect(ctx.db.select().from(scoutItemEvidence).where(eq(scoutItemEvidence.itemId, item.id)).all()).toHaveLength(2);
+    expect(events.filter((event) => event.type === 'item.updated')).toHaveLength(2);
+  });
+
+  it('POST /resolve — rejects an ABA state cycle with 409', async () => {
+    const item = await createTestItem();
+    const originalTransaction = ctx.db.transaction.bind(ctx.db);
+    const transactionSpy = vi.spyOn(ctx.db, 'transaction').mockImplementationOnce(((callback: any, config: any) => {
+      ctx.db.update(scoutItems).set({ status: 'done', updatedAt: '2099-01-01T00:00:00.001Z' }).where(eq(scoutItems.id, item.id)).run();
+      ctx.db.update(scoutItems).set({ status: 'new', updatedAt: '2099-01-01T00:00:00.002Z' }).where(eq(scoutItems.id, item.id)).run();
+      return originalTransaction(callback, config);
+    }) as any);
+
+    const res = await post('/resolve', {
+      id: item.id,
+      evidence: testEvidence({ scenario: 'Reject stale resolve after ABA cycle' }),
+    }, ctx.developerToken);
+    transactionSpy.mockRestore();
+
+    expect(res.status).toBe(409);
+    expect(await res.text()).toContain('Item state changed concurrently');
+    expect(ctx.db.select().from(scoutItems).where(eq(scoutItems.id, item.id)).get()?.status).toBe('new');
+  });
+
+  it('POST /resolve — maps SQLite busy snapshot errors to 409', async () => {
+    const item = await createTestItem();
+    const transactionSpy = vi.spyOn(ctx.db, 'transaction').mockImplementationOnce(() => {
+      throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY_SNAPSHOT' });
+    });
+
+    const res = await post('/resolve', {
+      id: item.id,
+      evidence: testEvidence({ scenario: 'Map SQLite busy snapshot to a conflict' }),
+    }, ctx.developerToken);
+    transactionSpy.mockRestore();
+
+    expect(res.status).toBe(409);
+    expect(await res.text()).toContain('Item state changed concurrently');
   });
 
   it('POST /verify — triager can accept a done item', async () => {
@@ -406,6 +597,35 @@ describe('Items routes', () => {
     const getRes = await post('/get', { id: item.id }, ctx.adminToken);
     const getBody = await getRes.json() as any;
     expect(getBody.data.notes.some((note: any) => note.content.includes('Button still fails on mobile'))).toBe(true);
+  });
+
+  it('POST /request-changes — rolls back the transition when its actionable note fails', async () => {
+    const item = await createTestItem();
+    await resolveTestItem(item.id);
+    const notesBefore = ctx.db.select().from(scoutItemNotes).where(eq(scoutItemNotes.itemId, item.id)).all();
+    ctx.db.run(sql.raw(`
+      CREATE TRIGGER fail_item_comment
+      BEFORE INSERT ON scout_item_notes
+      WHEN NEW.type = 'comment'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced comment failure');
+      END
+    `));
+
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await post('/request-changes', {
+      id: item.id,
+      summary: 'This note insert must fail',
+      expected: 'The full transition rolls back',
+      actual: 'The trigger aborts the comment insert',
+    }, ctx.adminToken);
+    consoleError.mockRestore();
+
+    expect(res.status).toBe(500);
+    const stored = ctx.db.select().from(scoutItems).where(eq(scoutItems.id, item.id)).get();
+    const notesAfter = ctx.db.select().from(scoutItemNotes).where(eq(scoutItemNotes.itemId, item.id)).all();
+    expect(stored?.status).toBe('done');
+    expect(notesAfter).toEqual(notesBefore);
   });
 
   // === CANCEL ===
