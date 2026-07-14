@@ -20,14 +20,11 @@ done
 for command_file in "$source_dir"/*.md; do
   [ -e "$command_file" ] || continue
   target_file="$target_dir/$(basename "$command_file")"
-  # Global commands are one-way copies, never live links back into the checkout.
-  if [ -L "$target_file" ]; then
-    rm -f "$target_file"
-  fi
-  if [ -e "$target_file" ] && cmp -s "$command_file" "$target_file"; then
+  if [ -L "$target_file" ] && [ "$(readlink "$target_file")" = "$command_file" ]; then
     continue
   fi
-  cp "$command_file" "$target_file"
+  rm -f "$target_file"
+  ln -s "$command_file" "$target_file"
 done
 
 printf 'Installed Scout OpenCode commands to %s\n' "$target_dir"

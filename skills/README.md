@@ -33,7 +33,7 @@ For development use outside the checkout:
 
 Set `OPENCODE_COMMANDS_DIR=<COMMANDS_DIR>` only when the global command target differs from `~/.config/opencode/commands`.
 
-The skill symlink reflects repo edits immediately on the next OpenCode start. The command is intentionally a one-way copy: after changing `.opencode/commands/scout.md`, rerun the installer. Never edit the global command copy and sync it back into the repository.
+The skill and command symlinks reflect repo edits immediately on the next OpenCode start. Never edit a global link target and sync it back into the repository; change the authored files in this checkout and let the runner installer verify the links.
 
 Restart OpenCode after changing the skill, references, command, or `.opencode/opencode.json`; the running process retains already-loaded configuration and skill context.
 
