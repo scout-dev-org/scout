@@ -307,14 +307,6 @@ function findDuplicateItem(data: {
   source: ItemSource;
   message: string;
   reporterId: string;
-  priority: ItemPriority | null;
-  labelsJson: string | null;
-  pageUrl?: string | null;
-  pageRoute?: string | null;
-  componentFile?: string | null;
-  cssSelector?: string | null;
-  elementText?: string | null;
-  elementHtml?: string | null;
   dedupeKey?: string;
 }): typeof scoutItems.$inferSelect | null {
   const candidates = db.select().from(scoutItems)
@@ -338,18 +330,7 @@ function findDuplicateItem(data: {
       return candidate;
     }
 
-    const isSameFingerprint =
-      normalizeDedupeString(candidate.message) === normalizeDedupeString(data.message) &&
-      candidate.priority === data.priority &&
-      candidate.labels === data.labelsJson &&
-      normalizeDedupeString(candidate.pageUrl) === normalizeDedupeString(data.pageUrl) &&
-      normalizeDedupeString(candidate.pageRoute) === normalizeDedupeString(data.pageRoute) &&
-      normalizeDedupeString(candidate.componentFile) === normalizeDedupeString(data.componentFile) &&
-      normalizeDedupeString(candidate.cssSelector) === normalizeDedupeString(data.cssSelector) &&
-      normalizeDedupeString(candidate.elementText) === normalizeDedupeString(data.elementText) &&
-      normalizeDedupeString(candidate.elementHtml) === normalizeDedupeString(data.elementHtml);
-
-    if (isSameFingerprint) return candidate;
+    if (normalizeDedupeString(candidate.message) === normalizeDedupeString(data.message)) return candidate;
   }
 
   return null;
@@ -458,14 +439,6 @@ export function createItem(data: {
     source,
     message: data.message,
     reporterId: data.reporterId,
-    priority,
-    labelsJson,
-    pageUrl: data.pageUrl,
-    pageRoute: data.pageRoute,
-    componentFile: data.componentFile,
-    cssSelector: data.cssSelector,
-    elementText: data.elementText,
-    elementHtml: data.elementHtml,
     dedupeKey,
   });
   if (duplicate) return { item: duplicate, deduped: true };
