@@ -26,27 +26,68 @@ jobs:
       contents: read
 
     steps:
-      - name: Configure SSH
+      - name: Check out production commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare immutable deploy bundle
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_REF: ${{ inputs.ref }}
+        run: |
+          set -eu
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            test "$REQUESTED_REF" = master
+          fi
+
+          git fetch --no-tags origin master
+          deploy_sha="$(git rev-parse 'HEAD^{commit}')"
+          test "$deploy_sha" = "$(git rev-parse 'refs/remotes/origin/master^{commit}')"
+
+          cleanup_ref() {
+            git update-ref -d refs/scout-deploy/candidate >/dev/null 2>&1 || true
+          }
+          trap cleanup_ref EXIT
+          git update-ref refs/scout-deploy/candidate "$deploy_sha"
+          git bundle create "$RUNNER_TEMP/scout-deploy.bundle" refs/scout-deploy/candidate
+          git bundle verify "$RUNNER_TEMP/scout-deploy.bundle" >/dev/null
+          printf 'DEPLOY_SHA=%s\n' "$deploy_sha" >> "$GITHUB_ENV"
+
+      - name: Configure pinned SSH trust
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_TARGET_KNOWN_HOSTS: ${{ vars.DEPLOY_TARGET_KNOWN_HOSTS }}
           DEPLOY_BASTION_HOST: ${{ vars.DEPLOY_BASTION_HOST }}
           DEPLOY_BASTION_PORT: ${{ vars.DEPLOY_BASTION_PORT || '22' }}
           DEPLOY_BASTION_USER: ${{ vars.DEPLOY_BASTION_USER }}
+          DEPLOY_BASTION_KNOWN_HOSTS: ${{ vars.DEPLOY_BASTION_KNOWN_HOSTS }}
         run: |
           set -eu
           test -n "$DEPLOY_SSH_KEY"
           test -n "$DEPLOY_HOST"
           test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_TARGET_KNOWN_HOSTS"
+          case "$DEPLOY_PORT" in *[!0-9]*|'') printf '%s\n' "DEPLOY_PORT must be numeric" >&2; exit 1 ;; esac
 
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_TARGET_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
-          if [ -n "$DEPLOY_BASTION_HOST" ]; then
+          if [ -n "$DEPLOY_BASTION_HOST" ] || [ -n "$DEPLOY_BASTION_USER" ] || [ -n "$DEPLOY_BASTION_KNOWN_HOSTS" ]; then
+            test -n "$DEPLOY_BASTION_HOST"
             test -n "$DEPLOY_BASTION_USER"
+            test -n "$DEPLOY_BASTION_KNOWN_HOSTS"
+            case "$DEPLOY_BASTION_PORT" in *[!0-9]*|'') printf '%s\n' "DEPLOY_BASTION_PORT must be numeric" >&2; exit 1 ;; esac
+            printf '%s\n' "$DEPLOY_BASTION_KNOWN_HOSTS" >> ~/.ssh/known_hosts
+            ssh-keygen -F "$DEPLOY_BASTION_HOST" -f ~/.ssh/known_hosts >/dev/null
+            ssh-keygen -F "$DEPLOY_HOST" -f ~/.ssh/known_hosts >/dev/null
             {
               printf '%s\n' 'Host deploy-bastion'
               printf '  HostName %s\n' "$DEPLOY_BASTION_HOST"
@@ -54,7 +95,9 @@ jobs:
               printf '  User %s\n' "$DEPLOY_BASTION_USER"
               printf '%s\n' '  IdentityFile ~/.ssh/deploy_key'
               printf '%s\n' '  IdentitiesOnly yes'
-              printf '%s\n' '  StrictHostKeyChecking accept-new'
+              printf '%s\n' '  StrictHostKeyChecking yes'
+              printf '%s\n' '  UserKnownHostsFile ~/.ssh/known_hosts'
+              printf '%s\n' '  GlobalKnownHostsFile /dev/null'
               printf '\n'
               printf '%s\n' 'Host deploy-target'
               printf '  HostName %s\n' "$DEPLOY_HOST"
@@ -63,9 +106,12 @@ jobs:
               printf '%s\n' '  IdentityFile ~/.ssh/deploy_key'
               printf '%s\n' '  IdentitiesOnly yes'
               printf '%s\n' '  ProxyJump deploy-bastion'
-              printf '%s\n' '  StrictHostKeyChecking accept-new'
+              printf '%s\n' '  StrictHostKeyChecking yes'
+              printf '%s\n' '  UserKnownHostsFile ~/.ssh/known_hosts'
+              printf '%s\n' '  GlobalKnownHostsFile /dev/null'
             } > ~/.ssh/config
           else
+            ssh-keygen -F "$DEPLOY_HOST" -f ~/.ssh/known_hosts >/dev/null
             {
               printf '%s\n' 'Host deploy-target'
               printf '  HostName %s\n' "$DEPLOY_HOST"
@@ -73,39 +119,63 @@ jobs:
               printf '  User %s\n' "$DEPLOY_USER"
               printf '%s\n' '  IdentityFile ~/.ssh/deploy_key'
               printf '%s\n' '  IdentitiesOnly yes'
-              printf '%s\n' '  StrictHostKeyChecking accept-new'
+              printf '%s\n' '  StrictHostKeyChecking yes'
+              printf '%s\n' '  UserKnownHostsFile ~/.ssh/known_hosts'
+              printf '%s\n' '  GlobalKnownHostsFile /dev/null'
             } > ~/.ssh/config
           fi
+          chmod 600 ~/.ssh/config
 
       - name: Deploy with backup
         env:
-          DEPLOY_REF: ${{ github.event.inputs.ref || github.event.workflow_run.head_branch || 'master' }}
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
           DEPLOY_COMPOSE_FILE: ${{ vars.DEPLOY_COMPOSE_FILE || 'docker-compose.yml' }}
           DEPLOY_SERVICE: ${{ vars.DEPLOY_SERVICE || 'scout' }}
           DEPLOY_IMAGE: ${{ vars.DEPLOY_IMAGE || 'scout-local:master' }}
           DEPLOY_SOURCE_PATH: ${{ vars.DEPLOY_SOURCE_PATH }}
           DEPLOY_BACKUP_PATH: ${{ vars.DEPLOY_BACKUP_PATH || 'backups' }}
-          DEPLOY_REPOSITORY_URL: ${{ vars.DEPLOY_REPOSITORY_URL || format('https://github.com/{0}.git', github.repository) }}
         run: |
           set -eu
+          test -n "$DEPLOY_SHA"
           test -n "$DEPLOY_PATH"
           test -n "$DEPLOY_SERVICE"
           test -n "$DEPLOY_IMAGE"
           test -n "$DEPLOY_SOURCE_PATH"
 
+          remote_bundle="/tmp/scout-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.bundle"
+          remote_uploaded=0
+          cleanup_remote() {
+            if [ "$remote_uploaded" -eq 1 ]; then
+              # shellcheck disable=SC2029
+              ssh deploy-target rm -f "$remote_bundle" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup_remote EXIT
+          scp -p "$RUNNER_TEMP/scout-deploy.bundle" deploy-target:"$remote_bundle"
+          remote_uploaded=1
+
+          # shellcheck disable=SC2029
           ssh deploy-target 'sh -s' \
-            "$DEPLOY_REF" "$DEPLOY_PATH" "$DEPLOY_COMPOSE_FILE" "$DEPLOY_SERVICE" "$DEPLOY_IMAGE" "$DEPLOY_SOURCE_PATH" "$DEPLOY_BACKUP_PATH" "$DEPLOY_REPOSITORY_URL" <<'REMOTE'
+            "$DEPLOY_SHA" "$DEPLOY_PATH" "$DEPLOY_COMPOSE_FILE" "$DEPLOY_SERVICE" "$DEPLOY_IMAGE" "$DEPLOY_SOURCE_PATH" "$DEPLOY_BACKUP_PATH" "$remote_bundle" <<'REMOTE'
           set -eu
 
-          ref="$1"
+          deploy_sha="$1"
           deploy_path="$2"
           compose_file="$3"
           service="$4"
           image="$5"
           source_path="$6"
           backup_path="$7"
-          repository_url="$8"
+          bundle_path="$8"
+          candidate_ref="refs/scout-deploy/candidate"
+
+          cleanup_bundle() {
+            rm -f "$bundle_path"
+            if [ -d "$source_path/.git" ]; then
+              git -C "$source_path" update-ref -d "$candidate_ref" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup_bundle EXIT
 
           cd "$deploy_path"
           docker compose -f "$compose_file" config >/tmp/scout-deploy-compose.yml
@@ -136,22 +206,22 @@ jobs:
           fi
 
           if [ ! -d "$source_path/.git" ]; then
-            git clone "$repository_url" "$source_path"
-          else
-            current_url="$(git -C "$source_path" remote get-url origin)"
-            if [ "$current_url" != "$repository_url" ]; then
-              git -C "$source_path" remote set-url origin "$repository_url"
-            fi
+            mkdir -p "$source_path"
+            git -C "$source_path" init
           fi
-          git -C "$source_path" fetch --prune origin "$ref"
-          git -C "$source_path" checkout "$ref"
-          git -C "$source_path" reset --hard "origin/$ref"
+          test -z "$(git -C "$source_path" status --porcelain)"
+          git -C "$source_path" fetch --no-tags "$bundle_path" \
+            "+refs/scout-deploy/candidate:$candidate_ref"
+          test "$(git -C "$source_path" rev-parse "${candidate_ref}^{commit}")" = "$deploy_sha"
+          git -C "$source_path" checkout -B master "$candidate_ref"
+          git -C "$source_path" reset --hard "$candidate_ref"
           docker build -t "$image" "$source_path"
 
           docker compose -f "$compose_file" up -d --remove-orphans "$service"
           docker compose -f "$compose_file" ps
           echo "backup_dir=$backup_dir"
           REMOTE
+          remote_uploaded=0
 
       - name: Verify health
         env:
