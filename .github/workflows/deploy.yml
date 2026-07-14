@@ -37,15 +37,17 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           REQUESTED_REF: ${{ inputs.ref }}
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -eu
           if [ "$EVENT_NAME" = workflow_dispatch ]; then
             test "$REQUESTED_REF" = master
           fi
 
-          git fetch --no-tags origin master
           deploy_sha="$(git rev-parse 'HEAD^{commit}')"
-          test "$deploy_sha" = "$(git rev-parse 'refs/remotes/origin/master^{commit}')"
+          if [ -n "$EXPECTED_SHA" ]; then
+            test "$deploy_sha" = "$EXPECTED_SHA"
+          fi
 
           cleanup_ref() {
             git update-ref -d refs/scout-deploy/candidate >/dev/null 2>&1 || true
