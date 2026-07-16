@@ -1,4 +1,22 @@
-import type { ItemStatus } from '../db/schema.js';
+import type { ItemStatus, ScoutItem } from '../db/schema.js';
+
+export type ItemSummary = Pick<ScoutItem,
+  | 'id'
+  | 'projectId'
+  | 'itemType'
+  | 'source'
+  | 'message'
+  | 'status'
+  | 'priority'
+  | 'labels'
+  | 'reporterId'
+  | 'assigneeId'
+  | 'createdAt'
+  | 'updatedAt'
+> & {
+  reporterName: string | null;
+  assigneeName: string | null;
+};
 
 export const ITEM_EVIDENCE_KINDS = ['handoff', 'verification', 'audit', 'blocker'] as const;
 export const ITEM_EVIDENCE_RESULTS = ['pass', 'fail', 'blocked', 'partial'] as const;

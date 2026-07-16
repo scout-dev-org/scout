@@ -187,6 +187,34 @@ describe('API Keys routes', () => {
     expect(body.data.user.passwordHash).toBeUndefined();
   });
 
+  it('purpose=agent API keys cannot mint a human JWT through /api/auth/refresh', async () => {
+    const createRes = await post('/create', {
+      projectId: ctx.projectId,
+      name: 'Agent refresh guard',
+      purpose: 'agent',
+    }, ctx.adminToken);
+    const created = await createRes.json() as any;
+
+    const res = await app.request('/api/auth/refresh', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${created.data.key}` },
+    });
+
+    expect(res.status).toBe(403);
+  });
+
+  it('custom API keys retain the existing /api/auth/refresh behavior', async () => {
+    const created = await createTestApiKey();
+    const res = await app.request('/api/auth/refresh', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${created.key}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.data.token).toBeTypeOf('string');
+  });
+
   it('revoked API key returns 401', async () => {
     const created = await createTestApiKey();
 

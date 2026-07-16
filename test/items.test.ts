@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import { itemRoutes } from '../server/routes/items.js';
+import { apiKeyRoutes } from '../server/routes/api-keys.js';
 import { projects, scoutItemEvidence, scoutItemNotes, scoutItems } from '../server/db/schema.js';
 import { createTestContext, type TestContext } from './helpers.js';
 import { randomUUID } from 'node:crypto';
@@ -27,6 +28,7 @@ describe('Items routes', () => {
 
     app = new Hono();
     app.route('/api/items', itemRoutes);
+    app.route('/api/api-keys', apiKeyRoutes);
   });
 
   function rawPost(path: string, body: unknown, token: string) {
@@ -62,6 +64,25 @@ describe('Items routes', () => {
     }, token || ctx.adminToken);
     const body = await res.json() as any;
     return body.data;
+  }
+
+  async function createProjectApiKey(purpose: 'agent' | 'custom', scopes?: string[]) {
+    const res = await app.request('/api/api-keys/create', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${ctx.adminToken}`,
+      },
+      body: JSON.stringify({
+        projectId: ctx.projectId,
+        name: `${purpose} items test key`,
+        purpose,
+        ...(scopes ? { scopes } : {}),
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json() as any;
+    return body.data.key as string;
   }
 
   function testEvidence(overrides: Record<string, unknown> = {}) {
@@ -149,6 +170,39 @@ describe('Items routes', () => {
     const body = await res.json() as any;
     expect(body.data.items).toHaveLength(2);
     expect(body.data.pagination.total).toBe(2);
+  });
+
+  it('POST /list — returns the exact summary shape while /get retains full detail', async () => {
+    const createRes = await post('/create', {
+      projectId: ctx.projectId,
+      message: 'Heavy detail must stay out of list responses',
+      pageUrl: 'http://localhost:3000/private-detail',
+      cssSelector: '#heavy-detail',
+      metadata: { browser: 'test' },
+      debugContext: { version: 1, console: [{ level: 'error', message: 'detail-only' }] },
+    }, ctx.adminToken);
+    const created = (await createRes.json() as any).data;
+
+    const listRes = await post('/list', { projectId: ctx.projectId }, ctx.adminToken);
+    expect(listRes.status).toBe(200);
+    const listBody = await listRes.json() as any;
+    const summary = listBody.data.items.find((item: any) => item.id === created.id);
+    expect(Object.keys(summary).sort()).toEqual([
+      'assigneeId', 'assigneeName', 'createdAt', 'id', 'itemType', 'labels', 'message',
+      'priority', 'projectId', 'reporterId', 'reporterName', 'source', 'status', 'updatedAt',
+    ]);
+    expect(summary).not.toHaveProperty('debugContext');
+    expect(summary).not.toHaveProperty('metadata');
+    expect(summary).not.toHaveProperty('pageUrl');
+    expect(summary).not.toHaveProperty('attemptCount');
+
+    const getRes = await post('/get', { id: created.id }, ctx.adminToken);
+    expect(getRes.status).toBe(200);
+    const detail = (await getRes.json() as any).data;
+    expect(detail.pageUrl).toBe('http://localhost:3000/private-detail');
+    expect(detail.cssSelector).toBe('#heavy-detail');
+    expect(detail.metadata).toContain('browser');
+    expect(detail.debugContext).toContain('detail-only');
   });
 
   it('POST /list — filter by status', async () => {
@@ -574,6 +628,53 @@ describe('Items routes', () => {
     expect(getBody.data.notes.some((note: any) => note.content === 'Accepted by QA')).toBe(true);
   });
 
+  it('POST /verify — rejects an agent key before the admin bypass and keeps other triage operations', async () => {
+    const item = await createTestItem();
+    await resolveTestItem(item.id);
+    const agentKey = await createProjectApiKey('agent');
+
+    const agentGet = await post('/get', { id: item.id }, agentKey);
+    expect(agentGet.status).toBe(200);
+    const agentView = await agentGet.json() as any;
+    expect(agentView.data.permissions.canVerify).toBe(false);
+
+    const denied = await post('/verify', {
+      id: item.id,
+      updatedAt: agentView.data.updatedAt,
+    }, agentKey);
+    expect(denied.status).toBe(403);
+
+    const accepted = await post('/verify', { id: item.id }, ctx.adminToken);
+    expect(accepted.status).toBe(200);
+    const acceptedBody = await accepted.json() as any;
+    expect(acceptedBody.data.status).toBe('verified');
+
+    const changes = await post('/request-changes', {
+      id: item.id,
+      summary: 'Agent triage remains available',
+      expected: 'The accepted item returns to engineering work',
+      actual: 'Acceptance evidence needs another change',
+    }, agentKey);
+    expect(changes.status).toBe(200);
+    expect((await changes.json() as any).data.status).toBe('changes_requested');
+  });
+
+  it('POST /verify — does not extend the agent-purpose denial to custom API keys', async () => {
+    const item = await createTestItem();
+    await resolveTestItem(item.id);
+    const customKey = await createProjectApiKey('custom', ['items:read', 'items:triage']);
+
+    const getRes = await post('/get', { id: item.id }, customKey);
+    const current = await getRes.json() as any;
+    expect(current.data.permissions.canVerify).toBe(true);
+
+    const verifyRes = await post('/verify', {
+      id: item.id,
+      updatedAt: current.data.updatedAt,
+    }, customKey);
+    expect(verifyRes.status).toBe(200);
+  });
+
   it('POST /request-changes — triager can return a done item with actionable context', async () => {
     const item = await createTestItem();
     await post('/claim', { id: item.id }, ctx.developerToken);
@@ -661,6 +762,28 @@ describe('Items routes', () => {
     const body = await res.json() as any;
     expect(body.data.content).toBe('This is a manual comment');
     expect(body.data.type).toBe('comment');
+  });
+
+  it('POST /add-evidence — blocker evidence does not change workflow status or item revision', async () => {
+    const item = await createTestItem();
+    const before = ctx.db.select().from(scoutItems).where(eq(scoutItems.id, item.id)).get()!;
+
+    const res = await post('/add-evidence', {
+      id: item.id,
+      ...testEvidence({
+        kind: 'blocker',
+        result: 'blocked',
+        level: 'static',
+        scenario: 'A required external dependency is unavailable',
+        visibleResult: 'The item remains active with supplemental blocker evidence',
+      }),
+    }, ctx.developerToken);
+
+    expect(res.status).toBe(201);
+    const after = ctx.db.select().from(scoutItems).where(eq(scoutItems.id, item.id)).get()!;
+    expect(after.status).toBe(before.status);
+    expect(after.updatedAt).toBe(before.updatedAt);
+    expect(ctx.db.select().from(scoutItemEvidence).where(eq(scoutItemEvidence.itemId, item.id)).get()?.kind).toBe('blocker');
   });
 
   // === LINKS ===

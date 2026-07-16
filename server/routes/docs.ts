@@ -24,7 +24,7 @@ const ITEM_REVISION_PROPERTY = {
   type: 'string',
   minLength: 1,
   maxLength: 64,
-  description: 'Обязательное точное значение item.updatedAt из последнего прочитанного клиентом item. Устаревшее значение возвращает 409.',
+  description: 'Opaque item revision token. Клиент обязан вернуть точное значение item.updatedAt из последнего прочитанного item without parsing, normalization, or reformatting; устаревшее или изменённое значение возвращает 409.',
 };
 
 function itemRequestSchema(extraProperties: OpenApiSchema = {}, extraRequired: string[] = []): OpenApiSchema {
@@ -48,7 +48,7 @@ const spec = {
     title: 'Scout Bug Tracking API',
     version: '1.0.0',
     description:
-      'Scout — self-hosted bug tracker for AI-assisted product teams. Agent workflows are expected to drive actionable work to the furthest honest status with structured evidence, asking only for hard gates such as missing access, production release, destructive action, external communication, live-money/provider action, secrets exposure, or human acceptance. Для AI/operator completion используйте один endpoint `/items/resolve`; он сам доводит активные рабочие статусы до `done` при наличии passing target evidence. Все API-эндпоинты используют метод POST с JSON-телом (кроме health, events, docs). Авторизация через Bearer JWT или API Key (`sk_live_...`). OpenAPI path keys are relative to `servers[0].url`: for example `/items/list` becomes `/api/items/list` at runtime. Use the exact method, path, and JSON body fields shown by this OpenAPI document; do not infer REST-style item URLs, query-string item reads, or payload fields from endpoint names. Compatibility decision: Scout is pre-release, so item mutation requests intentionally make client-observed `updatedAt` mandatory without a legacy fallback; clients must read the item first and send that exact revision, while stale revisions receive 409. Unknown `/api/*` paths return JSON `API_ENDPOINT_NOT_FOUND` with a docs link and endpoint hint instead of dashboard HTML.',
+      'Scout — self-hosted bug tracker for AI-assisted product teams. Agent workflows are expected to drive actionable work to the furthest honest status with structured evidence, asking only for hard gates such as missing access, production release, destructive action, external communication, live-money/provider action, secrets exposure, or human acceptance. Для AI/operator completion используйте один endpoint `/items/resolve`; он сам доводит активные рабочие статусы до `done` при наличии passing target evidence. Все API-эндпоинты используют метод POST с JSON-телом (кроме health, events, docs). Авторизация через Bearer JWT или API Key (`sk_live_...`). OpenAPI path keys are relative to `servers[0].url`: for example `/items/list` becomes `/api/items/list` at runtime. Use the exact method, path, and JSON body fields shown by this OpenAPI document; do not infer REST-style item URLs, query-string item reads, or payload fields from endpoint names. Compatibility decision: Scout is pre-release, so item mutation requests intentionally make client-observed `updatedAt` mandatory without a legacy fallback; clients must read the item first and return that opaque string byte-for-byte without parsing, normalization, or reformatting, while stale revisions receive 409. Unknown `/api/*` paths return JSON `API_ENDPOINT_NOT_FOUND` with a docs link and endpoint hint instead of dashboard HTML.',
     contact: { url: 'https://your-scout.example' },
   },
   servers: [
@@ -259,7 +259,27 @@ const spec = {
           attemptCount: { type: 'integer' },
           resolvedAt: { type: 'string', format: 'date-time', nullable: true },
           createdAt: { type: 'string', format: 'date-time' },
-          updatedAt: { type: 'string', format: 'date-time' },
+          updatedAt: ITEM_REVISION_PROPERTY,
+        },
+      },
+      ItemSummary: {
+        type: 'object',
+        required: ['id', 'projectId', 'itemType', 'source', 'message', 'status', 'priority', 'labels', 'reporterId', 'reporterName', 'assigneeId', 'assigneeName', 'createdAt', 'updatedAt'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          projectId: { type: 'string', format: 'uuid' },
+          itemType: { $ref: '#/components/schemas/ItemType' },
+          source: { $ref: '#/components/schemas/ItemSource' },
+          message: { type: 'string' },
+          status: { $ref: '#/components/schemas/ItemStatus' },
+          priority: { allOf: [{ $ref: '#/components/schemas/ItemPriority' }], nullable: true },
+          labels: { type: 'string', nullable: true, description: 'JSON array of label strings' },
+          reporterId: { type: 'string', format: 'uuid', nullable: true },
+          reporterName: { type: 'string', nullable: true },
+          assigneeId: { type: 'string', format: 'uuid', nullable: true },
+          assigneeName: { type: 'string', nullable: true },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: ITEM_REVISION_PROPERTY,
         },
       },
       ItemPermissions: {
@@ -268,7 +288,7 @@ const spec = {
           canClaim: { type: 'boolean' },
           canUpdateStatus: { type: 'boolean' },
           canResolve: { type: 'boolean' },
-          canVerify: { type: 'boolean' },
+          canVerify: { type: 'boolean', description: 'Human acceptance permission. Always false for purpose=agent API keys.' },
           canRequestChanges: { type: 'boolean' },
           canCancel: { type: 'boolean' },
           canReopen: { type: 'boolean' },
@@ -563,7 +583,7 @@ const spec = {
       post: {
         tags: ['Auth'],
         summary: 'Обновить JWT',
-        description: 'Возвращает новый JWT-токен и актуальные данные текущего авторизованного пользователя.',
+        description: 'Возвращает новый JWT-токен и актуальные данные текущего авторизованного пользователя. purpose=agent API keys получают 403 и не могут обменять ограниченный credential на human JWT; другие API key purposes сохраняют текущее поведение.',
         security: AUTH_SECURITY,
         responses: {
           200: {
@@ -586,6 +606,7 @@ const spec = {
             },
           },
           401: { description: 'Не авторизован', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          403: { description: 'purpose=agent API key не может получить human JWT', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },
@@ -692,7 +713,7 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Список items',
-        description: 'Пагинированный список items проекта с фильтрацией. Требуется доступ к проекту.',
+        description: 'Пагинированный lightweight summary список items проекта с фильтрацией. Полный context и тяжёлые diagnostics доступны через `/items/get`. Требуется доступ к проекту.',
         security: AUTH_SECURITY,
         requestBody: {
           required: true,
@@ -727,7 +748,7 @@ const spec = {
                     data: {
                       type: 'object',
                       properties: {
-                        items: { type: 'array', items: { $ref: '#/components/schemas/Item' } },
+                        items: { type: 'array', items: { $ref: '#/components/schemas/ItemSummary' } },
                         pagination: { $ref: '#/components/schemas/Pagination' },
                       },
                     },
@@ -955,7 +976,7 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Принять item человеком',
-        description: 'Переводит item из done в verified после human acceptance. Не перетирает assignee, resolvedById или resolvedAt; переданный comment сохраняется атомарно с переходом. Конкурентное изменение состояния или revision возвращает 409. Требуется project permission `triage` (admin/owner/manager).',
+        description: 'Переводит item из done в verified после human acceptance. Не перетирает assignee, resolvedById или resolvedAt; переданный comment сохраняется атомарно с переходом. Конкурентное изменение состояния или revision возвращает 409. Требуется project permission `accept_item` (admin/owner/manager); purpose=agent API keys всегда запрещены, включая ключи system admin. JWT human sessions и другие API key purposes следуют обычной role/scope policy.',
         security: AUTH_SECURITY,
         requestBody: {
           required: true,
@@ -974,7 +995,7 @@ const spec = {
             content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Item' } } } } },
           },
           409: STATUS_CONFLICT_RESPONSE,
-          403: { description: 'Недостаточно прав', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          403: { description: 'Нет human acceptance permission либо credential является purpose=agent API key', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           404: { description: 'Item не найден', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
@@ -1104,7 +1125,7 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Добавить structured evidence',
-        description: 'Добавляет supplemental structured evidence к item. Для переходов в review/done агентские workflow передают evidence inline в status request. Требуется project permission `comment`.',
+        description: 'Добавляет supplemental structured evidence к item. Blocker evidence ортогонален workflow status: запись сама по себе не меняет status или item.updatedAt revision и не означает, что item исключён из active queue. Для переходов в review/done агентские workflow передают evidence inline в status request. Требуется project permission `comment`.',
         security: AUTH_SECURITY,
         requestBody: {
           required: true,

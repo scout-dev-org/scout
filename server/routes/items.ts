@@ -18,6 +18,22 @@ import { createItem, claimItem, resolveItem, updateItemStatus, deleteItem, updat
 import { logAudit, getClientIp } from '../services/audit.js';
 import { dispatchWebhooks } from '../services/webhooks.js';
 import { eventBus } from '../lib/event-bus.js';
+import type { ItemSummary } from '../lib/item-contract.js';
+
+const itemSummarySelection = {
+  id: scoutItems.id,
+  projectId: scoutItems.projectId,
+  itemType: scoutItems.itemType,
+  source: scoutItems.source,
+  message: scoutItems.message,
+  status: scoutItems.status,
+  priority: scoutItems.priority,
+  labels: scoutItems.labels,
+  reporterId: scoutItems.reporterId,
+  assigneeId: scoutItems.assigneeId,
+  createdAt: scoutItems.createdAt,
+  updatedAt: scoutItems.updatedAt,
+} satisfies Record<keyof Omit<ItemSummary, 'reporterName' | 'assigneeName'>, unknown>;
 
 /** Resolve user name by id, with simple cache */
 const userNameCache = new Map<string, string>();
@@ -38,10 +54,19 @@ function enrichItem(item: typeof scoutItems.$inferSelect) {
   };
 }
 
+function enrichItemSummary(item: Omit<ItemSummary, 'reporterName' | 'assigneeName'>): ItemSummary {
+  return {
+    ...item,
+    reporterName: getUserName(item.reporterId),
+    assigneeName: getUserName(item.assigneeId),
+  };
+}
+
 function getItemPermissions(item: typeof scoutItems.$inferSelect, user: typeof users.$inferSelect, apiKey: ApiKey | null) {
   const isNote = item.itemType === 'note';
   const canWorkflow = hasProjectPermission(user.id, user.role, item.projectId, 'workflow', apiKey);
   const canTriage = hasProjectPermission(user.id, user.role, item.projectId, 'triage', apiKey);
+  const canAccept = hasProjectPermission(user.id, user.role, item.projectId, 'accept_item', apiKey);
   const canComment = hasProjectPermission(user.id, user.role, item.projectId, 'comment', apiKey);
   const canUseGenericStatusUpdate = ['in_progress', 'review', 'changes_requested'].includes(item.status);
   const canCancelOwnNew = item.status === 'new' && item.reporterId === user.id && canComment;
@@ -49,7 +74,7 @@ function getItemPermissions(item: typeof scoutItems.$inferSelect, user: typeof u
     canClaim: !isNote && item.status === 'new' && canWorkflow,
     canUpdateStatus: !isNote && canWorkflow && canUseGenericStatusUpdate,
     canResolve: !isNote && canWorkflow,
-    canVerify: !isNote && canTriage && item.status === 'done',
+    canVerify: !isNote && canAccept && item.status === 'done',
     canRequestChanges: !isNote && canTriage && (item.status === 'review' || item.status === 'done' || item.status === 'verified'),
     canCancel: canTriage || canCancelOwnNew,
     canReopen: canTriage,
@@ -169,7 +194,7 @@ export const itemRoutes = new Hono()
 
       const where = conditions.length === 1 ? conditions[0]! : and(...conditions);
 
-      const items = db.select().from(scoutItems)
+      const items = db.select(itemSummarySelection).from(scoutItems)
         .where(where)
         .orderBy(desc(scoutItems.createdAt))
         .limit(pageSize)
@@ -180,7 +205,7 @@ export const itemRoutes = new Hono()
 
       return c.json({
         data: {
-          items: items.map(enrichItem),
+          items: items.map(enrichItemSummary),
           pagination: {
             page,
             perPage: pageSize,
@@ -357,7 +382,7 @@ export const itemRoutes = new Hono()
 
       const existing = db.select({ projectId: scoutItems.projectId }).from(scoutItems).where(eq(scoutItems.id, id)).get();
       if (!existing) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
-      requireProjectPermission(user.id, user.role, existing.projectId, 'triage', c.get('apiKey'));
+      requireProjectPermission(user.id, user.role, existing.projectId, 'accept_item', c.get('apiKey'));
 
       const trimmedComment = comment?.trim();
       const { item, note, oldStatus } = updateItemStatus(

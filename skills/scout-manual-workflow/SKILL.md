@@ -72,4 +72,6 @@ Before declaring a non-production data or state blocker, attempt or rule out a s
 
 Do not stop at a plan when safe executable work remains. Do not claim success while verification, an authorized deploy, a Scout mutation, or an in-scope follow-up is still running.
 
+Before returning, reread every item changed in the run, refetch the queue-selected scope across all relevant pages through live OpenAPI, and reconcile unexpected remaining work. A confirmed empty queue is a normal successful outcome.
+
 Return a short evidence-based result: selected scope, change or finding, fresh verification, Scout transitions made, authorized git/deploy actions performed, and exact remaining blockers. Do not paste queue dumps, schemas, raw payloads, secrets, or long command logs.

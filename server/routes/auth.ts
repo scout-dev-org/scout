@@ -7,7 +7,7 @@ import { users, apiKeys, pivotUsersProjects } from '../db/schema.js';
 import { loginSchema, validateTokenSchema } from '../lib/schemas.js';
 import { signToken, comparePassword, verifyToken } from '../services/auth.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { UnauthorizedError } from '../lib/errors.js';
+import { ForbiddenError, UnauthorizedError } from '../lib/errors.js';
 import { logAudit, getClientIp } from '../services/audit.js';
 
 function stripPasswordWithProjectRoles(user: typeof users.$inferSelect) {
@@ -48,6 +48,9 @@ export const authRoutes = new Hono()
   })
 
   .post('/refresh', authMiddleware, async (c) => {
+    if (c.get('apiKey')?.purpose === 'agent') {
+      throw new ForbiddenError('Agent API keys cannot mint human session tokens', 'AGENT_API_KEY_HUMAN_ACTION_DENIED');
+    }
     const user = c.get('user');
     const token = signToken(user);
     return c.json({ data: { token, user: stripPasswordWithProjectRoles(user) } });

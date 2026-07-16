@@ -11,6 +11,7 @@ export type ProjectPermission =
   | 'comment'
   | 'workflow'
   | 'triage'
+  | 'accept_item'
   | 'read_errors'
   | 'write_errors'
   | 'triage_errors'
@@ -19,8 +20,8 @@ export type ProjectPermission =
   | 'manage_integrations';
 
 const PROJECT_ROLE_PERMISSIONS: Record<ProjectRole, ProjectPermission[]> = {
-  owner: ['view', 'create_item', 'comment', 'workflow', 'triage', 'read_errors', 'write_errors', 'triage_errors', 'manage_project', 'manage_members', 'manage_integrations'],
-  manager: ['view', 'create_item', 'comment', 'workflow', 'triage', 'read_errors', 'write_errors', 'triage_errors', 'manage_integrations'],
+  owner: ['view', 'create_item', 'comment', 'workflow', 'triage', 'accept_item', 'read_errors', 'write_errors', 'triage_errors', 'manage_project', 'manage_members', 'manage_integrations'],
+  manager: ['view', 'create_item', 'comment', 'workflow', 'triage', 'accept_item', 'read_errors', 'write_errors', 'triage_errors', 'manage_integrations'],
   developer: ['view', 'comment', 'workflow', 'read_errors'],
   reporter: ['view', 'create_item', 'comment'],
   viewer: ['view'],
@@ -32,6 +33,7 @@ const API_KEY_PERMISSION_SCOPES: Record<ProjectPermission, ApiKeyScope[]> = {
   comment: ['items:comment'],
   workflow: ['items:workflow'],
   triage: ['items:triage'],
+  accept_item: ['items:triage'],
   read_errors: ['errors:read'],
   write_errors: ['errors:write'],
   triage_errors: ['errors:triage'],
@@ -43,6 +45,7 @@ const API_KEY_PERMISSION_SCOPES: Record<ProjectPermission, ApiKeyScope[]> = {
 function hasApiKeyPermission(apiKey: ApiKey | null | undefined, projectId: string, permission: ProjectPermission): boolean {
   if (!apiKey) return true;
   if (apiKey.projectId !== projectId) return false;
+  if (permission === 'accept_item' && apiKey.purpose === 'agent') return false;
   const allowedScopes = API_KEY_PERMISSION_SCOPES[permission];
   if (allowedScopes.length === 0) return false;
   const scopes = getApiKeyScopes(apiKey);
