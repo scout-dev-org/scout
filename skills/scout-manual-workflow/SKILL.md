@@ -20,7 +20,7 @@ This is a manual command workflow, not a daemon. Do not poll, start a background
 - Build decisions from the full current item, related work, available artifacts, repository behavior, and fresh runtime evidence. Treat old notes and summaries as hints.
 - Use scoped disposable non-production fixtures when ordinary missing data, content, uploads, roles, or state would otherwise block acceptance. Clean up or restore them when safe; otherwise record exactly what remains and why.
 - Before every Scout transition, verify its current live-contract preconditions and attach item-specific evidence that proves the claimed outcome. If the evidence is insufficient, keep the honest current state and record the exact blocker.
-- `/items/resolve` is the sole AI/operator completion path. Call it once with inline passing acceptance evidence; do not add preparatory claim or status calls merely to make completion legal.
+- Discover the current AI/operator completion operation and required evidence from live OpenAPI; complete only with item-specific passing acceptance evidence and no preparatory transitions merely to make completion legal.
 - AI/operator completion and human acceptance are separate. Never perform the human acceptance action unless the user explicitly grants that decision; use the live contract to discover its current operation.
 - Commit, push, or deploy only when the user's request or the current repository/workflow policy grants that action. `/scout` alone is not blanket permission. Production or protected-target actions always require explicit authorization.
 
