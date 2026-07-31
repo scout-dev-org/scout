@@ -5,7 +5,7 @@ Use this reference only after the core skill selects queue, next-item, note-tria
 ## Build The Live Queue
 
 1. Discover the current project and active workflow through live OpenAPI. Do not use a cached status list or a copied queue mapping.
-2. Fetch enough current candidates to compare returned work, work already under review or implementation, newly reported work, and untriaged observations.
+2. For a single-item run, fetch enough current candidates to compare the relevant work. For explicit full-queue scope, offset pagination is not an atomic snapshot: before the first mutation, require two consecutive complete passes with the same total and ID set, then freeze those IDs and add only dependencies proved from their records. Retry a changed pass only a bounded number of times; if the population never stabilizes, do not claim it is frozen or begin full-queue mutation.
 3. Fetch the full current record before claiming, converting, linking, editing, or transitioning an item.
 4. Do not take over clearly active work owned by another person unless the user asks or current evidence shows it is abandoned and the workflow permits takeover.
 

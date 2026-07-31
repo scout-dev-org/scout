@@ -4,7 +4,7 @@ Use this reference for implementation, verification, review follow-up, Scout tra
 
 ## Intake And Diagnosis
 
-1. Fetch live OpenAPI and the full current item before any mutation. Derive every operation and payload from that contract at execution time.
+1. Use the live OpenAPI loaded for this run and fetch the full current item before any mutation. Derive every operation and payload from that contract at execution time; refresh OpenAPI only when the contract may have changed.
 2. Inspect evidence in the cheapest useful order: item and notes, structured browser/runtime context, screenshot or direct URL, compact recording summary, then full replay or large artifacts only when path, timing, navigation, or missing context requires them.
 3. For user-visible reports, reconstruct the user's role, entry state, action sequence, navigation, and final visible outcome. Browser evidence is primary; API, logs, and database reads support diagnosis.
 4. For linked runtime errors, inspect the current error context and targeted telemetry needed to confirm root cause or recurrence. Keep raw private logs and payloads out of Scout.
@@ -29,7 +29,7 @@ Before every mutation, re-read the item's current state and choose the live docu
 
 - Start ownership only when active work begins and completion evidence does not already exist.
 - Hand off for review only when implementation and local verification are complete, the repository's required change reference exists, and target acceptance cannot safely finish in this run. Attach fresh item-specific evidence in the transition operation.
-- Complete AI/operator work only through one `/items/resolve` call with inline passing acceptance evidence. Never pre-claim or pre-transition an item solely to prepare that call.
+- Complete AI/operator work only through the current live AI/operator completion operation with inline passing acceptance evidence. Never pre-claim or pre-transition an item solely to prepare completion.
 - Treat AI completion as ready for human acceptance, not accepted closure. Perform human acceptance only after explicit user instruction, using the current operation from live OpenAPI.
 - Use the live purpose-built rejection or reopen operations only for explicit human review, audit, or regression intent; do not synthesize those outcomes through a generic status update.
 - Supplemental notes or evidence may clarify an existing state, but do not churn state merely to rewrite metadata.
@@ -38,15 +38,13 @@ If the required evidence does not exist, satisfy the acceptance precondition you
 
 ## Git, Push, And Deploy
 
-The `/scout` invocation is not standalone authorization for repository mutation beyond the requested engineering work.
+Apply the core skill's Hard Gates. This section defines the canonical mechanics after the requested engineering work and repository policy authorize an action.
 
 1. Discover the target repository's current rules before branch, commit, push, or deploy actions.
-2. Create a focused commit only when the user or repository/workflow policy grants commits. Include the Scout reference using the repository's established convention.
-3. Push only when explicitly granted by the user or current workflow policy and the destination is allowed. Inspect the outgoing history and never include unrelated or secret-bearing changes.
-4. Deploy only when explicitly granted by the user or current workflow policy, through the one canonical path for that target.
-5. Production, protected/default targets, release promotions, force operations, and bypasses require explicit approval.
-6. Never invent SSH or another manual fallback when the canonical deploy path is absent or failing.
-7. Wait for authorized deploy and verification work to finish, then record the actual result. A successful deploy alone is not item acceptance.
+2. Create and push a focused commit under the target repository and global Git completion policy. Include the Scout reference using the repository's established convention, inspect outgoing history, and never include unrelated changes.
+3. Deploy only after the core Hard Gates are satisfied, through the one canonical path for that target.
+4. Never invent SSH or another manual fallback when the canonical deploy path is absent or failing.
+5. Wait for authorized deploy and verification work to finish, then record the actual result. A successful deploy alone is not item acceptance.
 
 ## External Providers And Communication
 

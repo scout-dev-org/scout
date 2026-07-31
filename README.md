@@ -144,11 +144,7 @@ User APIs use `projectRoles` for per-project access assignment.
 
 Scout ships the `scout-manual-workflow` agent skill and one thin OpenCode command, `/scout`. The repository skill is the only authored owner; it selects single-item, queue, delivery, and explicit audit workflows from the user's arguments and live Scout state.
 
-When OpenCode runs inside this repository, `.opencode/opencode.json` loads the repo skill directly. For development use outside the checkout, project the skill with the documented global symlink and install the command as a one-way copy:
-
-```bash
-./scripts/install-opencode-commands.sh
-```
+When OpenCode runs inside this repository, `.opencode/opencode.json` loads the repo skill directly. For development use outside the checkout, follow the two-step Developer Projection in `skills/README.md`: create the skill symlink, then install the command symlink with `scripts/install-opencode-commands.sh`.
 
 Do not install or update a separate copied skill with `npx skills`; stale installed copies are unsupported. `skills/README.md` defines the exact source, projection, update, and restart path.
 
@@ -158,7 +154,7 @@ Create an agent API key from the dashboard and store it in a password manager, s
 
 The live API contract at `/api/docs/openapi.json` is the single source of truth for clients, agent skills, and operator workflows. Use it for every endpoint method, URL, request body, allowed value, and response shape; do not preserve copied schema or payload details in documentation.
 
-For AI/operator completion, `/items/resolve` is the canonical path with inline acceptance evidence. Human acceptance is a separate explicitly authorized action. Discover both operations from the live contract rather than relying on cached payload rules.
+AI/operator completion requires inline acceptance evidence. Human acceptance is a separate explicitly authorized action. Discover both operations from the live contract rather than relying on cached paths or payload rules.
 
 Interactive docs: `https://your-scout.example/api/docs`
 

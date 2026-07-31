@@ -12,9 +12,9 @@ Use this reference only for an explicit audit of completed or human-accepted wor
 
 ## Durable Ledger
 
-Before broad testing or batch mutations, create a resumable ledger outside the repository under a narrow operator-state path such as `~/.local/state/opencode/scout-ledgers/`.
+Create a resumable ledger outside the repository only for multi-session work, large mutation batches, or a real compaction/interruption risk. A short read-only audit may keep its ledger in session state.
 
-Record only what is needed to resume safely: item identity, current decision, acceptance scenario, evidence strength, result, relevant change/deploy reference, next action, and mutation outcome. Never store credentials, cookies, raw private payloads, or large logs. Update the ledger after each item or small mutation batch and preserve command/exit/result summaries before cleaning up evidence-producing sessions.
+When a durable ledger is needed, record only what is required to resume: item identity, current decision, acceptance scenario, evidence strength, result, relevant change/deploy reference, next action, and mutation outcome. Update it after each item or small mutation batch.
 
 Refresh live Scout state when resuming. Ledger rows are snapshots, not authority.
 
@@ -22,7 +22,7 @@ Refresh live Scout state when resuming. Ledger rows are snapshots, not authority
 
 1. Inventory current routes, roles, query-driven states, fixtures, destructive boundaries, and expected-negative cases from the live application and repository.
 2. Prefer a controlled headless runner with bounded concurrency over many visible browser contexts.
-3. Write incremental results outside the repository so interruption does not erase progress.
+3. When the durable-ledger rule above applies, write incremental results outside the repository so interruption does not erase progress; otherwise keep the short read-only sweep in session state.
 4. Stay below application rate limits. Slow and rerun affected cases rather than reporting rate-limit noise as product failures.
 5. Classify expected negatives and third-party noise before reporting findings.
 6. Reproduce every suspicious result with a small targeted check before mutating Scout.
