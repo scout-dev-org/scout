@@ -19,7 +19,7 @@ Use this reference for implementation, verification, review follow-up, Scout tra
 
 Structured evidence is the transition gate. It must identify what environment and scenario were checked, what action occurred, what was observed, how that observation covers this item, and any relevant change/deploy reference or remaining risk. These are semantic requirements, not API field names; derive the current fields and allowed values from live OpenAPI.
 
-Before every mutation, re-read the item's current state and choose the live documented operation that matches the intent:
+Before a transition, ownership change, destructive update, or mutation after waiting/external activity, re-read the item's current state and choose the live documented operation that matches the intent. Consecutive note/evidence writes may reuse the current record while no concurrency signal exists:
 
 - Start ownership only when active work begins and completion evidence does not already exist.
 - Hand off for review only when implementation and local verification are complete, the repository's required change reference exists, and target acceptance cannot safely finish in this run. Attach fresh item-specific evidence in the transition operation.

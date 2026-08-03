@@ -16,7 +16,7 @@ These instructions apply only to this repository. Keep durable operator behavior
 ## Workflow
 
 - Use `pnpm` scripts from the current `package.json`; do not invent parallel npm/yarn workflows.
-- For `/scout` behavior, update the repo skill and command first, then sync or link the active OpenCode copies intentionally.
+- For `/scout` behavior, update the repo-owned skill and command. Verify or change an external projection only when the task explicitly includes maintaining it.
 - Keep `/scout` as a thin entrypoint into `scout-manual-workflow`; lifecycle, status, endpoint, and evidence rules belong in the skill.
 - Treat live OpenAPI as the only endpoint/method/body/response source. If docs or skills disagree with live OpenAPI, update the lower-level text instead of adding fallback clients.
 - Production deploys require the documented GitHub Actions path from `master`; manual SSH deploy is not an automatic fallback.
@@ -26,7 +26,6 @@ These instructions apply only to this repository. Keep durable operator behavior
 - For code changes, run the narrowest relevant check first, then the canonical repo check needed for the touched surface: `pnpm typecheck`, `pnpm test`, `pnpm test:e2e`, or `pnpm build`.
 - For dashboard, widget, auth, route, or browser-state changes, verify with Playwright/browser evidence; API checks alone are not enough.
 - For `/scout` workflow changes, verify frontmatter, trigger boundaries, command/skill sync, live OpenAPI assumptions, and the exact status/evidence path affected.
-- Before committing, inspect `git status --short`, `git diff`, and recent history; stage only intended files.
 
 ## Secrets
 

@@ -21,7 +21,7 @@ Refresh live Scout state when resuming. Ledger rows are snapshots, not authority
 ## Broad Browser Or Route Sweeps
 
 1. Inventory current routes, roles, query-driven states, fixtures, destructive boundaries, and expected-negative cases from the live application and repository.
-2. Use the target repository's canonical repeatable browser runner for broad matrices. Use interactive browser tools only for targeted reproduction or smoke checks.
+2. Use the target repository's canonical repeatable browser runner for broad matrices. Use `playwright-cli` only for targeted reproduction or smoke checks.
 3. When the durable-ledger rule above applies, write incremental results outside the repository so interruption does not erase progress; otherwise keep the short read-only sweep in session state.
 4. Stay below application rate limits. Slow and rerun affected cases rather than reporting rate-limit noise as product failures.
 5. Classify expected negatives and third-party noise before reporting findings.

@@ -15,7 +15,7 @@ The live contract at `$SCOUT_URL/api/docs/openapi.json` is the only source for A
 | Developer global skill | Repo skill directory | `~/.config/opencode/skills/scout-manual-workflow` is a symlink to the repo owner |
 | Global command | Repo command file | `scripts/install-opencode-commands.sh` creates the configured global symlink |
 
-There is no second authored or bidirectionally synchronized skill. A copied `scout-manual-workflow` installed by `npx skills` under `~/.agents/skills`, project agent-skill directories, or the OpenCode global skill directory is stale and unsupported; remove that copy before creating the developer symlink. Do not run `npx skills update` for this skill.
+There is no second authored or bidirectionally synchronized skill. Before an explicitly requested developer projection, inspect existing paths and realpaths. Do not overwrite or delete a conflicting copy until its provenance is known and replacement is explicitly approved. Do not run `npx skills update` for this skill.
 
 ## Developer Projection
 
@@ -23,7 +23,7 @@ For OpenCode launched inside this repository, no projection or installation is n
 
 For development use outside the checkout:
 
-1. Remove any existing copied or vendor-installed `scout-manual-workflow` from OpenCode and external agent skill locations so it cannot compete with the repo owner.
+1. Inspect existing `scout-manual-workflow` paths and realpaths. If a conflicting copy exists, report its provenance and replace it only with explicit approval.
 2. Create `~/.config/opencode/skills/scout-manual-workflow` as a symlink to `<SCOUT_REPO>/skills/scout-manual-workflow`.
 3. Install the global command symlink from the checkout:
 
