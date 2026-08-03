@@ -36,12 +36,11 @@ Search by affected route or component, visible symptom, error text, environment,
 - Cluster work only when items share a root cause, change, deploy target, or acceptance path.
 - Keep one cohesive implementation for a true shared root, but verify and update every item against its own reported acceptance condition.
 - Keep separate causes as separate work even when they appear on the same screen.
-- Escalate incompatible requested outcomes as a product hard gate; continue unrelated safe work.
 
 ## Queue Discipline
 
 - Claim or mark active ownership only when implementation or active verification actually starts.
-- Keep an internal readiness row for each item that may move: acceptance intent, strongest fresh evidence, unchecked risk, hard gate, and next honest outcome.
+- Keep an internal readiness row for each item that may move: acceptance intent, strongest fresh evidence, unchecked risk, blocker, and next honest outcome.
 - Refresh the queue after meaningful transitions or discoveries, not after every read-only step.
 - Do not paste full queue snapshots into Scout notes or chat.
 - At the end, every in-scope item must have an honest outcome for this run: completed through the canonical AI path, handed off with evidence, still active with an exact blocker, left as a focused untriaged question, or cancelled for a recorded reason.

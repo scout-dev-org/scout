@@ -1,5 +1,5 @@
 ---
-description: Handle Scout item or queue end-to-end
+description: Handle Scout item or queue, including inspect/read-only mode
 subtask: false
 ---
 

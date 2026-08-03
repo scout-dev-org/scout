@@ -21,13 +21,12 @@ Refresh live Scout state when resuming. Ledger rows are snapshots, not authority
 ## Broad Browser Or Route Sweeps
 
 1. Inventory current routes, roles, query-driven states, fixtures, destructive boundaries, and expected-negative cases from the live application and repository.
-2. Prefer a controlled headless runner with bounded concurrency over many visible browser contexts.
+2. Use the target repository's canonical repeatable browser runner for broad matrices. Use interactive browser tools only for targeted reproduction or smoke checks.
 3. When the durable-ledger rule above applies, write incremental results outside the repository so interruption does not erase progress; otherwise keep the short read-only sweep in session state.
 4. Stay below application rate limits. Slow and rerun affected cases rather than reporting rate-limit noise as product failures.
 5. Classify expected negatives and third-party noise before reporting findings.
 6. Reproduce every suspicious result with a small targeted check before mutating Scout.
 7. Separate tool/runner failures from application failures and identify which evidence they invalidate.
-8. Do not perform destructive or mass-write scenarios without explicit permission and disposable non-production fixtures.
 
 ## Batch Mutation Discipline
 
@@ -36,7 +35,6 @@ Refresh live Scout state when resuming. Ledger rows are snapshots, not authority
 - Use small serial mutation batches unless the live contract and repository workflow establish another safe mechanism.
 - Verify the resulting items and counts after each small batch rather than assuming every request succeeded.
 - On rate limiting or transient failure, use bounded retry and re-read current state; do not switch to invented endpoint sequences.
-- Continue unrelated safe audit work when one item is blocked.
 
 ## Audit Result
 
