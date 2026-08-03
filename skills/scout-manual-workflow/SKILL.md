@@ -7,7 +7,7 @@ description: Use only when the user explicitly invokes `/scout` or asks to take,
 
 ## Purpose
 
-Own the selected Scout work end-to-end as one engineering operator: understand intent, inspect live evidence, diagnose the real behavior, make the smallest complete change, verify the acceptance path, and leave evidence-backed Scout state and a concise handoff.
+Own the selected Scout scope, its mutations and evidence-backed completion state.
 
 This is a manual command workflow, not a daemon. Do not continuously poll Scout for new work, start a background queue worker, or touch unrelated Scout work. Bounded waiting for an operation already started is allowed.
 
@@ -48,12 +48,10 @@ For a single read-only item lookup, remain in this core unless the request expan
 
 ## Execution Loop
 
-1. Resolve the requested project and scope through live OpenAPI, then fetch each candidate's current full record before acting.
-2. Build an internal readiness view: intent, ownership, related work, affected repository, acceptance path, available evidence, blockers, and furthest honest outcome.
-3. Reproduce or gather the nearest practical evidence, trace the affected flow to its root cause, and inspect adjacent behavior only where shared code, safety, or acceptance requires it.
-4. Implement and freshly verify the reported acceptance path.
-5. Record concise Scout notes and structured evidence at meaningful milestones, then perform only transitions supported by that evidence and the live contract.
-6. In explicit full-queue scope, refresh after meaningful mutations or discoveries and continue through the frozen item IDs. Keep notes, evidence, and transitions item-specific even when one fix covers a cluster.
+1. Resolve scope through live OpenAPI and fetch each candidate's current full record.
+2. Execute and verify the requested acceptance path under the owning repository workflow.
+3. Record item-specific evidence and perform only live-contract transitions that it supports.
+4. In explicit full-queue scope, continue through the frozen item IDs and refresh after meaningful mutations or discoveries.
 
 ## Completion
 

@@ -14,14 +14,6 @@ fi
 
 mkdir -p "$target_dir"
 
-# Remove command names previously shipped before Scout converged on one `/scout` entrypoint.
-for stale_command in scout-resume.md scout-triage.md scout-one.md scout-all.md scout-review.md scout-audit.md scout-readiness.md; do
-  stale_file="$target_dir/$stale_command"
-  if [ -L "$stale_file" ] && [ "$(readlink "$stale_file")" = "$source_dir/$stale_command" ]; then
-    rm "$stale_file"
-  fi
-done
-
 target_file="$target_dir/$command_name"
 if [ -e "$target_file" ] && [ ! -L "$target_file" ]; then
   printf '%s\n' "Refusing to replace regular file: $target_file" >&2
