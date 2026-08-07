@@ -1,6 +1,6 @@
 ---
 description: Handle Scout item or queue, including inspect/read-only mode
-subtask: false
+argument-hint: [item-id | queue | status]
 ---
 
 Load and follow the `scout-manual-workflow` skill.

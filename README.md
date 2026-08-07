@@ -142,11 +142,9 @@ User APIs use `projectRoles` for per-project access assignment.
 
 ## Agent Skill
 
-Scout ships the `scout-manual-workflow` agent skill and one thin OpenCode command, `/scout`. The repository skill is the only authored owner; it selects single-item, queue, delivery, and explicit audit workflows from the user's arguments and live Scout state.
+Scout ships the `scout-manual-workflow` agent skill and one thin command, `/scout`. The repository skill is the only authored owner; it selects single-item, queue, delivery, and explicit audit workflows from the user's arguments and live Scout state.
 
-When OpenCode runs inside this repository, `.opencode/opencode.json` loads the repo skill directly. For development use outside the checkout, follow the two-step Developer Projection in `skills/README.md`: create the skill symlink, then install the command symlink with `scripts/install-opencode-commands.sh`.
-
-Do not install or update a separate copied skill with `npx skills`; stale installed copies are unsupported. `skills/README.md` defines the exact source, projection, update, and restart path.
+Both live in `.claude/` and load automatically for any agent session started inside this checkout. There is no projection, installer, or copied global copy to keep in sync: edit `.claude/skills/scout-manual-workflow/SKILL.md` and `.claude/commands/scout.md` in place.
 
 Create an agent API key from the dashboard and store it in a password manager, shell environment, or local ignored `.env`, not in the repository.
 

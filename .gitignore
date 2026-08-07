@@ -11,9 +11,7 @@ storage/
 .DS_Store
 
 # Local AI/development agent files
-CLAUDE.md
 .playwright-mcp/
-.opencode.local/
 .mcp.json
 docs/superpowers/
 

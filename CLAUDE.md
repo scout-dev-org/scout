@@ -5,10 +5,9 @@ These instructions apply only to this repository. Keep durable operator behavior
 ## Sources Of Truth
 
 - Product and operator overview: `README.md`.
-- Agent skill source: `skills/scout-manual-workflow/SKILL.md`.
-- Skill and command routing/provenance: `skills/README.md`.
-- Active project command source: `.opencode/commands/scout.md`.
-- Project-local OpenCode config: `.opencode/opencode.json`.
+- Agent skill source: `.claude/skills/scout-manual-workflow/SKILL.md`.
+- Skill and command routing/provenance: `.claude/skills/README.md`.
+- Active project command source: `.claude/commands/scout.md`.
 - API contract for clients and agent workflows: live `/api/docs/openapi.json`; do not copy endpoint payload schemas into docs or skills as canonical field lists.
 - Development and verification commands: current `package.json`, `playwright.config.ts`, and repo scripts.
 - Production/deploy examples and restrictions: `deploy/README.md`; KAFU-specific local notes are ignored operator files, not portable repo policy.
