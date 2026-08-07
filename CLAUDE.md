@@ -25,8 +25,3 @@ These instructions apply only to this repository. Keep durable operator behavior
 - For code changes, run the narrowest relevant check first, then the canonical repo check needed for the touched surface: `pnpm typecheck`, `pnpm test`, `pnpm test:e2e`, or `pnpm build`.
 - For dashboard, widget, auth, route, or browser-state changes, verify with Playwright/browser evidence; API checks alone are not enough.
 - For `/scout` workflow changes, verify frontmatter, trigger boundaries, command/skill sync, live OpenAPI assumptions, and the exact status/evidence path affected.
-
-## Secrets
-
-- Do not commit Scout API keys, JWTs, cookies, `.env` files with real values, screenshots/recordings with private data, production host secrets, or one-time codes.
-- Use placeholders such as `<CHANGE-ME-*>` in tracked examples.
