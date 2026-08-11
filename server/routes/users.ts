@@ -44,7 +44,6 @@ function serializeUser(user: typeof users.$inferSelect, pivots = getUserProjectR
 
 function assertCanManageProjectRoles(currentUser: typeof users.$inferSelect, projectRoles: Array<{ projectId: string }>): void {
   if (currentUser.role === 'admin') return;
-  if (projectRoles.length === 0) throw new ForbiddenError('Нет прав управлять пользователями', 'NO_PROJECT_PERMISSION');
   for (const projectRole of projectRoles) {
     if (!hasProjectPermission(currentUser.id, currentUser.role, projectRole.projectId, 'manage_members')) {
       throw new ForbiddenError('Нет прав управлять участниками этого проекта', 'NO_PROJECT_PERMISSION');
@@ -83,6 +82,9 @@ export const userRoutes = new Hono()
 
       if (currentUser.role !== 'admin' && role === 'admin') {
         throw new ForbiddenError('Нет прав создавать администратора', 'FORBIDDEN');
+      }
+      if (currentUser.role !== 'admin' && projectRoles.length === 0) {
+        throw new ForbiddenError('Нет прав управлять пользователями', 'NO_PROJECT_PERMISSION');
       }
       assertCanManageProjectRoles(currentUser, projectRoles);
 

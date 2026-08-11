@@ -450,6 +450,7 @@
   "errors.SESSION_EXPIRED": "Сессия истекла, войдите заново",
   "errors.FORBIDDEN": "Доступ запрещён",
   "errors.NO_PROJECT_ACCESS": "Нет доступа к проекту",
+  "errors.NO_PROJECT_PERMISSION": "Недостаточно прав в этом проекте",
   "errors.NOT_FOUND": "Не найдено",
   "errors.ITEM_NOT_FOUND": "Задача не найдена",
   "errors.PROJECT_NOT_FOUND": "Проект не найден",

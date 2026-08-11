@@ -79,8 +79,9 @@ export function canManageProjectSettings(projectId?: string): boolean {
   return getProjectRole(projectId) === 'owner';
 }
 
-export function canManageMembers(): boolean {
-  return hasAnyProjectRole(['owner']);
+export function canManageMembers(projectId?: string): boolean {
+  if (!projectId) return hasAnyProjectRole(['owner']);
+  return getProjectRole(projectId) === 'owner';
 }
 
 export function canManageIntegrations(projectId?: string): boolean {

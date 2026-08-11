@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../lib/api';
-import { isAdmin } from '../lib/auth';
+import { canManageMembers, isAdmin } from '../lib/auth';
 import { useTranslation } from '../i18n';
 import Pagination from '../components/Pagination';
 
@@ -107,7 +107,9 @@ export default function Users() {
       name: u.name,
       role: u.role,
       isActive: u.isActive,
-      projectRoles: u.projectRoles ?? [],
+      // Only roles in projects the current user can manage: the rest are neither
+      // editable nor sent back, and the server keeps them untouched.
+      projectRoles: (u.projectRoles ?? []).filter((role) => canManageMembers(role.projectId)),
     });
     setError('');
     setShowModal(true);
@@ -131,7 +133,7 @@ export default function Users() {
         if (admin && form.password) {
           body.password = form.password;
         }
-        await api('/api/users/update', body);
+        await api('/api/users/update', body, t);
       } else {
         await api('/api/users/create', {
           email: form.email,
@@ -139,7 +141,7 @@ export default function Users() {
           name: form.name,
           role: form.role,
           projectRoles: form.projectRoles,
-        });
+        }, t);
       }
       setShowModal(false);
       await loadUsers();
@@ -153,7 +155,7 @@ export default function Users() {
   async function handleDelete(id: string) {
     if (!confirm(t('users.deleteConfirm'))) return;
     try {
-      await api('/api/users/delete', { id });
+      await api('/api/users/delete', { id }, t);
       await loadUsers();
     } catch (err) {
       alert(err instanceof Error ? err.message : t('validation.deleteError'));
@@ -177,6 +179,8 @@ export default function Users() {
       )),
     }));
   }
+
+  const manageableProjects = projects.filter((p) => canManageMembers(p.id));
 
   const roleBadge: Record<string, string> = {
     admin: 'bg-red-100 text-red-700',
@@ -447,14 +451,14 @@ export default function Users() {
               </label>
             )}
 
-            {projects.length > 0 && (
+            {manageableProjects.length > 0 && (
               <div className="mt-4">
                 <span className="text-sm font-medium text-gray-700">
                   {t('users.form.projects')}
                 </span>
                 <p className="mt-0.5 text-xs text-gray-500">{t('users.form.projectsHint')}</p>
                 <div className="mt-1 max-h-36 space-y-1 overflow-y-auto rounded-md border border-gray-200 p-2">
-                  {projects.map((p) => {
+                  {manageableProjects.map((p) => {
                     const enabled = form.projectRoles.some((role) => role.projectId === p.id);
                     const projectRole = form.projectRoles.find((role) => role.projectId === p.id)?.role ?? 'reporter';
                     return (

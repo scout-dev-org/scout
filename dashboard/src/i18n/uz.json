@@ -450,6 +450,7 @@
   "errors.SESSION_EXPIRED": "Sessiya muddati tugagan, qayta kiring",
   "errors.FORBIDDEN": "Kirish taqiqlangan",
   "errors.NO_PROJECT_ACCESS": "Loyihaga kirish huquqi yo'q",
+  "errors.NO_PROJECT_PERMISSION": "Bu loyihada yetarli huquq yo'q",
   "errors.NOT_FOUND": "Topilmadi",
   "errors.ITEM_NOT_FOUND": "Topshiriq topilmadi",
   "errors.PROJECT_NOT_FOUND": "Loyiha topilmadi",
