@@ -62,7 +62,7 @@ const spec = {
     { name: 'Webhooks', description: 'Вебхуки для проектных интеграций' },
     { name: 'Notifications', description: 'Email digests and operational notifications' },
     { name: 'API Keys', description: 'Project-scoped API keys для программного доступа' },
-    { name: 'Error Integrations', description: 'Runtime error groups and observability bridge endpoints' },
+    { name: 'Error Integrations', description: 'Runtime error groups reported by services' },
     { name: 'Events', description: 'Server-Sent Events (SSE) для real-time обновлений' },
     { name: 'Health', description: 'Проверка состояния сервера' },
     { name: 'Docs', description: 'Документация API' },
@@ -411,8 +411,6 @@ const spec = {
           ignoreReason: { type: 'string', nullable: true },
           sampleRequestId: { type: 'string', nullable: true },
           sampleTraceId: { type: 'string', nullable: true },
-          grafanaLogsUrl: { type: 'string', nullable: true },
-          grafanaTraceUrl: { type: 'string', nullable: true },
           samplePayload: { type: 'string', nullable: true },
           lastRelease: { type: 'string', nullable: true },
           lastRegressionAt: { type: 'string', format: 'date-time', nullable: true },
@@ -1972,7 +1970,7 @@ const spec = {
                 required: ['projectId', 'fingerprint', 'environment', 'service', 'errorType'],
                 properties: {
                   projectId: { type: 'string', format: 'uuid' },
-                  source: { type: 'string', default: 'alertmanager' },
+                  source: { type: 'string', default: 'runtime' },
                   fingerprint: { type: 'string', maxLength: 200 },
                   environment: { type: 'string', maxLength: 80 },
                   service: { type: 'string', maxLength: 120 },
@@ -1986,8 +1984,6 @@ const spec = {
                   occurredAt: { type: 'string', format: 'date-time' },
                   sampleRequestId: { type: 'string', maxLength: 160 },
                   sampleTraceId: { type: 'string', maxLength: 160 },
-                  grafanaLogsUrl: { type: 'string', format: 'uri' },
-                  grafanaTraceUrl: { type: 'string', format: 'uri' },
                   samplePayload: { type: 'object', additionalProperties: true },
                   title: { type: 'string', maxLength: 240 },
                   message: { type: 'string', maxLength: 4000 },
@@ -2065,25 +2061,6 @@ const spec = {
         responses: { 200: { description: 'Error group restored', content: { 'application/json': { schema: { type: 'object', properties: { data: { type: 'object', properties: { errorGroup: { $ref: '#/components/schemas/ErrorGroup' } } } } } } } } },
       },
     },
-    '/integrations/errors/bridge/alertmanager': {
-      post: {
-        tags: ['Error Integrations'],
-        summary: 'Alertmanager bridge webhook',
-        description: 'Queues Alertmanager payloads. Guarded by `SCOUT_ERROR_BRIDGE_SECRET` via `X-Scout-Error-Bridge-Secret` or Bearer secret.',
-        security: [],
-        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['alerts'], properties: { alerts: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'object' } } } } } } },
-        responses: { 202: { description: 'Queued' }, 200: { description: 'Duplicate already queued' }, 503: { description: 'Bridge disabled' } },
-      },
-    },
-    '/integrations/errors/bridge/health': {
-      get: {
-        tags: ['Error Integrations'],
-        summary: 'Error bridge queue health',
-        security: [],
-        responses: { 200: { description: 'Bridge queue status' } },
-      },
-    },
-
     // ═══════════════════════ Events (SSE) ═══════════════════════
     '/events/stream': {
       get: {

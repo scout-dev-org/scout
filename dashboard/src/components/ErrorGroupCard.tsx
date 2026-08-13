@@ -23,8 +23,6 @@ export interface ErrorGroupCardData {
   linkedItemMessage?: string | null;
   sampleRequestId: string | null;
   sampleTraceId: string | null;
-  grafanaLogsUrl: string | null;
-  grafanaTraceUrl: string | null;
   samplePayload?: string | null;
   lastRelease?: string | null;
 }
@@ -108,13 +106,6 @@ function hasRenderableValue(value: unknown): boolean {
   return true;
 }
 
-function tempoSpans(payload: unknown): JsonObject[] {
-  if (!isRecord(payload)) return [];
-  const trace = objectField(objectField(payload, 'tempo'), 'trace') ?? objectField(payload, 'trace');
-  const spans = trace?.spans;
-  return Array.isArray(spans) ? spans.filter(isRecord) : [];
-}
-
 function extractEscapedDiagnosticAttribute(rawText: string, attribute: string): JsonObject | null {
   const marker = `"${attribute}":"`;
   const start = rawText.indexOf(marker);
@@ -144,12 +135,6 @@ function diagnosticFromPayload(payload: unknown, rawText: string | null, name: s
   if (isRecord(payload)) {
     const direct = parseDiagnosticObject(payload[name]) ?? parseDiagnosticObject(objectField(payload, 'diagnostics')?.[name]);
     if (direct) return direct;
-
-    for (const span of tempoSpans(payload)) {
-      const attributes = objectField(span, 'attributes');
-      const diagnostic = parseDiagnosticObject(attributes?.[`gateway.diagnostic.${name}`]);
-      if (diagnostic) return diagnostic;
-    }
   }
 
   return rawText ? extractEscapedDiagnosticAttribute(rawText, `gateway.diagnostic.${name}`) : null;
@@ -377,20 +362,6 @@ function firstMessageLine(message: string | null | undefined) {
   return message?.split(/\r?\n/)[0]?.trim();
 }
 
-function grafanaHref(value: string) {
-  try {
-    const url = new URL(value);
-    const scoutHost = window.location.hostname;
-    const expectedGrafanaHost = scoutHost.startsWith('scout.') ? scoutHost.replace(/^scout\./, 'grafana.') : '';
-    if (expectedGrafanaHost && url.hostname === expectedGrafanaHost) {
-      return `/grafana${url.pathname}${url.search}${url.hash}`;
-    }
-  } catch {
-    return value;
-  }
-  return value;
-}
-
 export default function ErrorGroupCard({ group, actions, showLinkedItem = false }: ErrorGroupCardProps) {
   const { t, locale } = useTranslation();
   const diagnostics = buildGatewayDiagnostics(group.samplePayload);
@@ -444,11 +415,6 @@ export default function ErrorGroupCard({ group, actions, showLinkedItem = false 
           {t('errors.fields.linkedItem')}: {firstMessageLine(group.linkedItemMessage) || `#${group.linkedItemId.slice(0, 8)}`}
         </Link>
       )}
-
-      <div className="mt-3 flex flex-wrap gap-2">
-        {group.grafanaLogsUrl && <a href={grafanaHref(group.grafanaLogsUrl)} target="_blank" rel="noreferrer" className="text-xs font-medium text-blue-600 hover:underline">{t('errors.links.logs')}</a>}
-        {group.grafanaTraceUrl && <a href={grafanaHref(group.grafanaTraceUrl)} target="_blank" rel="noreferrer" className="text-xs font-medium text-blue-600 hover:underline">{t('errors.links.trace')}</a>}
-      </div>
 
       <details className="mt-3 text-xs text-gray-600">
         <summary className="cursor-pointer font-medium text-gray-700">{t('errors.summary.technicalDetails')}</summary>

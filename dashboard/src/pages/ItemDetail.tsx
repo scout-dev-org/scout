@@ -2122,8 +2122,6 @@ function isRuntimeMachineLine(line: string) {
     'upstream:',
     'request id:',
     'trace id:',
-    'grafana logs:',
-    'grafana trace:',
   ].some((prefix) => normalized.startsWith(prefix));
 }
 

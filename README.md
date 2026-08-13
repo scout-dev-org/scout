@@ -113,7 +113,7 @@ The dashboard shows a ready-to-copy snippet for each project under **Projects** 
 Responsive React SPA served from the same port as the API.
 
 - **Items** — Bug/note/task list with human queue tabs (`Open`, `In Progress`, `Needs Review`, `Needs Acceptance`, `Accepted`, `Archived`), type/priority filters, search, pagination, manual creation, and note-to-task triage for humans or AI agents. Detail view with debug context, screenshot lightbox, rrweb session player plus recording summary, notes timeline, related items, linked runtime errors, resolve modal, and simple human verify/request-changes actions
-- **Errors** — Runtime error groups with environment/service/fingerprint, route template, status/error classification, occurrence counts, auto-accepted `verified` linked Scout system item, and Grafana/Tempo context links when provided by integrations
+- **Errors** — Runtime error groups reported by services: environment/service/fingerprint, route template, status/error classification, occurrence counts, request/response diagnostics, and an auto-accepted `verified` linked Scout system item. A group with no new occurrence for `SCOUT_ERROR_AUTO_RESOLVE_DAYS` resolves itself and returns to `active` on recurrence
 - **Projects** — CRUD with allowed origins for CORS/SSO and links to per-project integrations
 - **Users** — CRUD with system roles and per-project role assignment
 - **Webhooks** — Per-project event notifications (Slack-compatible)
@@ -205,20 +205,10 @@ scout.example.com {
 | `SCOUT_DB_PATH` | `data/scout.db` | SQLite database path |
 | `SCOUT_CORS_ORIGINS` | — | Comma-separated allowed origins |
 | `SCOUT_DASHBOARD_WIDGET_PROJECT_SLUG` | — | Optional project slug for dashboard-embedded widget config |
-| `SCOUT_ERROR_BRIDGE_SECRET` | — | Shared secret required to enable the Alertmanager error bridge |
-| `SCOUT_ERROR_BRIDGE_WORKER_ENABLED` | `true` | Set `false` to disable background processing of queued error bridge jobs |
-| `SCOUT_ERROR_BRIDGE_WORKER_INTERVAL_MS` | `30000` | Error bridge worker interval |
-| `SCOUT_ERROR_BRIDGE_BATCH_SIZE` | `20` | Error bridge jobs processed per worker tick |
-| `SCOUT_ERROR_BRIDGE_MAX_ATTEMPTS` | `10` | Max delivery attempts before a bridge job is marked dead |
-| `SCOUT_ERROR_SAMPLE_MAX_JSON_LENGTH` | `20000` | Max stored JSON length for error group sample payloads and trace diagnostics |
+| `SCOUT_ERROR_SAMPLE_MAX_JSON_LENGTH` | `20000` | Max stored JSON length for error group sample payloads |
+| `SCOUT_ERROR_AUTO_RESOLVE_DAYS` | `7` | Days without a new occurrence before an active group resolves itself; `0` keeps every group open |
+| `SCOUT_ERROR_MAINTENANCE_INTERVAL_MS` | `3600000` | Interval of the worker that resolves stale error groups |
 | `SCOUT_ERROR_REGRESSION_COOLDOWN_MS` | `1800000` | Minimum elapsed time before a recurring linked runtime error updates `lastRegressionAt`; it does not reopen or activate the linked Scout item |
-| `SCOUT_GRAFANA_URL` | — | Viewer-accessible Grafana URL used to rewrite Alertmanager Prometheus generator links for dashboard users. If users should open links without a second login, configure Grafana/proxy anonymous Viewer access for that public URL; Scout does not embed Grafana credentials in links. |
-| `SCOUT_GRAFANA_TEMPO_DATASOURCE` | `Tempo` | Grafana Tempo datasource name/UID used when Scout builds trace links |
-| `SCOUT_TEMPO_URL` | — | Optional internal Tempo API base URL. When set, Alertmanager bridge jobs search matching traces by service/env/method/route/status and store trace diagnostics in error groups. |
-| `SCOUT_TEMPO_SEARCH_WINDOW_MS` | `900000` | Time window around alert `startsAt` used for Tempo trace lookup |
-| `SCOUT_TEMPO_TIMEOUT_MS` | `2000` | Per-request timeout for Tempo enrichment |
-| `SCOUT_GRAFANA_PROXY_TARGET` | — | Optional internal Grafana upstream for same-origin `/grafana/...` links. Requests require a valid Scout session cookie and should point to an internal/protected Grafana URL, not a public credential-bearing URL. |
-| `SCOUT_GRAFANA_PROXY_STRIP_PREFIX` | `false` | Set `true` only when the Grafana upstream is not configured with `/grafana` as its subpath. |
 | `SMTP_HOST` | — | SMTP server for email notifications |
 | `SMTP_PORT` | `587` | SMTP port |
 | `SMTP_USER` | — | SMTP username |

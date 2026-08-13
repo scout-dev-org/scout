@@ -12,8 +12,7 @@ import { webhookRoutes } from './routes/webhooks.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { apiKeyRoutes } from './routes/api-keys.js';
 import { integrationsErrorsRoutes } from './routes/integrations-errors.js';
-import { grafanaProxyRoutes } from './routes/grafana-proxy.js';
-import { startBridgeWorker, startErrorMaintenanceWorker } from './services/error-groups.js';
+import { startErrorMaintenanceWorker } from './services/error-groups.js';
 import { startDailyDigestWorker } from './services/email-digest.js';
 import { eventRoutes } from './routes/events.js';
 import { docsRoutes } from './routes/docs.js';
@@ -206,10 +205,6 @@ app.use('/storage/*', storageAuth, async (c, next) => {
   await next();
 }, serveStatic({ root: './' }));
 
-// Same-origin Grafana proxy for Scout-authenticated users. This keeps the
-// public Grafana hostname protected while allowing Scout links to open directly.
-app.route('/grafana', grafanaProxyRoutes);
-
 // SSO bridge — lightweight HTML page for cross-domain token storage via postMessage
 app.get('/auth/sso', (c) => {
   // Build allowedOrigins JSON for inline script
@@ -385,14 +380,12 @@ serve({ fetch: app.fetch, port }, (info) => {
   logger.info({ port: info.port }, 'Scout started');
 });
 
-const stopBridgeWorker = startBridgeWorker();
 const stopErrorMaintenanceWorker = startErrorMaintenanceWorker();
 const stopDailyDigestWorker = startDailyDigestWorker();
 
 // Graceful shutdown
 function shutdown() {
   logger.info('Shutting down');
-  stopBridgeWorker();
   stopErrorMaintenanceWorker();
   stopDailyDigestWorker();
   sqlite.close();

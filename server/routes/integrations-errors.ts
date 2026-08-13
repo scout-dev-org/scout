@@ -1,33 +1,15 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
-import { timingSafeEqual } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { errorGroups } from '../db/schema.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { checkProjectAccess, requireProjectPermission } from '../middleware/permissions.js';
-import { ForbiddenError, NotFoundError, UnauthorizedError } from '../lib/errors.js';
-import { alertmanagerWebhookSchema, errorUpsertSchema, getErrorGroupSchema, ignoreErrorGroupSchema, listErrorGroupsSchema, unignoreErrorGroupSchema } from '../lib/schemas.js';
-import { enqueueBridgeJob, getBridgeStatus, ignoreErrorGroup, listErrorGroups, processBridgeJobs, resolveErrorProjectId, unignoreErrorGroup, upsertErrorGroup } from '../services/error-groups.js';
+import { ForbiddenError, NotFoundError } from '../lib/errors.js';
+import { errorUpsertSchema, getErrorGroupSchema, ignoreErrorGroupSchema, listErrorGroupsSchema, unignoreErrorGroupSchema } from '../lib/schemas.js';
+import { ignoreErrorGroup, listErrorGroups, resolveErrorProjectId, unignoreErrorGroup, upsertErrorGroup } from '../services/error-groups.js';
 import { eventBus } from '../lib/event-bus.js';
-import { HTTPException } from 'hono/http-exception';
 import { dispatchWebhooks } from '../services/webhooks.js';
-
-const BRIDGE_SECRET_HEADER = 'x-scout-error-bridge-secret';
-
-function requireBridgeSecret(c: { req: { header: (name: string) => string | undefined } }): void {
-  const configuredSecret = process.env.SCOUT_ERROR_BRIDGE_SECRET?.trim();
-  if (!configuredSecret) throw new HTTPException(503, { message: 'Scout error bridge is disabled' });
-
-  const authorization = c.req.header('authorization')?.trim() ?? '';
-  const bearerSecret = authorization.toLowerCase().startsWith('bearer ') ? authorization.slice(7).trim() : '';
-  const providedSecret = c.req.header(BRIDGE_SECRET_HEADER)?.trim() || bearerSecret;
-  const configured = Buffer.from(configuredSecret);
-  const provided = Buffer.from(providedSecret);
-  if (configured.length !== provided.length || !timingSafeEqual(configured, provided)) {
-    throw new UnauthorizedError('Invalid bridge secret', 'BRIDGE_SECRET_INVALID');
-  }
-}
 
 export const integrationsErrorsRoutes = new Hono()
   .post('/upsert', authMiddleware, zValidator('json', errorUpsertSchema), async (c) => {
@@ -77,11 +59,4 @@ export const integrationsErrorsRoutes = new Hono()
     dispatchWebhooks(group.projectId, 'error_group.updated', { errorGroup: group }).catch(() => {});
     eventBus.publish({ type: 'error_group.updated', projectId: group.projectId, payload: { errorGroup: group } });
     return c.json({ data: { errorGroup: group } });
-  })
-  .post('/bridge/alertmanager', zValidator('json', alertmanagerWebhookSchema), async (c) => {
-    requireBridgeSecret(c);
-    const job = enqueueBridgeJob(c.req.valid('json'));
-    await processBridgeJobs(10);
-    return c.json({ data: { queued: true, ...job } }, job.inserted ? 202 : 200);
-  })
-  .get('/bridge/health', (c) => c.json({ data: { status: 'ok', queue: getBridgeStatus() } }));
+  });

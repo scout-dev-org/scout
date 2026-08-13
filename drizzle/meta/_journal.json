@@ -92,6 +92,13 @@
       "when": 1781592763000,
       "tag": "0012_debug_context",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1781592763001,
+      "tag": "0013_drop_observability_bridge",
+      "breakpoints": true
     }
   ]
 }

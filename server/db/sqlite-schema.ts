@@ -26,7 +26,6 @@ const CORE_TABLES = [
   'api_keys',
   'error_groups',
   'error_group_occurrences',
-  'scout_bridge_jobs',
   'email_digest_deliveries',
 ] as const;
 
@@ -277,8 +276,6 @@ const TABLE_SPECS: TableSpec[] = [
       ignore_reason TEXT,
       sample_request_id TEXT,
       sample_trace_id TEXT,
-      grafana_logs_url TEXT,
-      grafana_trace_url TEXT,
       sample_payload TEXT,
       last_release TEXT,
       last_regression_at TEXT,
@@ -291,7 +288,7 @@ const TABLE_SPECS: TableSpec[] = [
       'CREATE INDEX idx_error_groups_project_service ON error_groups(project_id, service)',
       'CREATE INDEX idx_error_groups_linked_item ON error_groups(linked_item_id)',
     ],
-    copyColumns: ['id', 'project_id', 'source', 'fingerprint', 'environment', 'service', 'route_template', 'method', 'upstream_service', 'error_type', 'status_code', 'status_class', 'severity', 'state', 'occurrence_count', 'first_seen_at', 'last_seen_at', 'linked_item_id', 'ignored_until', 'ignore_reason', 'sample_request_id', 'sample_trace_id', 'grafana_logs_url', 'grafana_trace_url', 'sample_payload', 'last_release', 'last_regression_at', 'created_at', 'updated_at'],
+    copyColumns: ['id', 'project_id', 'source', 'fingerprint', 'environment', 'service', 'route_template', 'method', 'upstream_service', 'error_type', 'status_code', 'status_class', 'severity', 'state', 'occurrence_count', 'first_seen_at', 'last_seen_at', 'linked_item_id', 'ignored_until', 'ignore_reason', 'sample_request_id', 'sample_trace_id', 'sample_payload', 'last_release', 'last_regression_at', 'created_at', 'updated_at'],
     primaryKey: ['id'],
     uniqueGroups: [['project_id', 'environment', 'fingerprint']],
   },
@@ -312,29 +309,6 @@ const TABLE_SPECS: TableSpec[] = [
     ],
     copyColumns: ['id', 'error_group_id', 'occurred_at', 'request_id', 'trace_id', 'status_code', 'sample_payload', 'created_at'],
     primaryKey: ['id'],
-  },
-  {
-    name: 'scout_bridge_jobs',
-    createSql: `CREATE TABLE scout_bridge_jobs (
-      id TEXT PRIMARY KEY,
-      event_id TEXT NOT NULL,
-      source TEXT NOT NULL DEFAULT 'alertmanager',
-      status TEXT NOT NULL DEFAULT 'pending',
-      attempts INTEGER NOT NULL DEFAULT 0,
-      next_attempt_at TEXT NOT NULL,
-      processing_started_at TEXT,
-      last_error TEXT,
-      payload TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    )`,
-    indexSql: [
-      'CREATE UNIQUE INDEX idx_scout_bridge_jobs_event_unique ON scout_bridge_jobs(event_id)',
-      'CREATE INDEX idx_scout_bridge_jobs_status_next ON scout_bridge_jobs(status, next_attempt_at)',
-    ],
-    copyColumns: ['id', 'event_id', 'source', 'status', 'attempts', 'next_attempt_at', 'processing_started_at', 'last_error', 'payload', 'created_at', 'updated_at'],
-    primaryKey: ['id'],
-    uniqueGroups: [['event_id']],
   },
   {
     name: 'email_digest_deliveries',

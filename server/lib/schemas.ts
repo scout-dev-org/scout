@@ -328,13 +328,12 @@ export const runDailyDigestSchema = z.object({
 });
 
 // === Error integrations ===
-const boundedUrlSchema = z.string().url().max(1000).optional();
 const errorSeveritySchema = z.enum(['info', 'warning', 'critical']);
 const errorStateSchema = z.enum(['active', 'ignored', 'resolved']);
 
 export const errorUpsertSchema = z.object({
   projectId: uuidSchema,
-  source: z.string().min(1).max(80).default('alertmanager'),
+  source: z.string().min(1).max(80).default('runtime'),
   fingerprint: z.string().min(1).max(200),
   environment: z.string().min(1).max(80),
   service: z.string().min(1).max(120),
@@ -348,8 +347,6 @@ export const errorUpsertSchema = z.object({
   occurredAt: z.string().datetime().optional(),
   sampleRequestId: z.string().max(160).optional(),
   sampleTraceId: z.string().max(160).optional(),
-  grafanaLogsUrl: boundedUrlSchema,
-  grafanaTraceUrl: boundedUrlSchema,
   samplePayload: z.record(z.unknown()).optional(),
   title: z.string().max(240).optional(),
   message: z.string().max(4000).optional(),
@@ -375,22 +372,3 @@ export const ignoreErrorGroupSchema = z.object({
 
 export const unignoreErrorGroupSchema = z.object({ id: uuidSchema });
 
-export const alertmanagerWebhookSchema = z.object({
-  version: z.string().optional(),
-  groupKey: z.string().max(500).optional(),
-  status: z.enum(['firing', 'resolved']).optional(),
-  receiver: z.string().max(120).optional(),
-  groupLabels: z.record(z.string()).optional(),
-  commonLabels: z.record(z.string()).optional(),
-  commonAnnotations: z.record(z.string()).optional(),
-  externalURL: z.string().max(1000).optional(),
-  alerts: z.array(z.object({
-    status: z.enum(['firing', 'resolved']),
-    labels: z.record(z.string()).default({}),
-    annotations: z.record(z.string()).default({}),
-    startsAt: z.string().optional(),
-    endsAt: z.string().optional(),
-    generatorURL: z.string().max(1000).optional(),
-    fingerprint: z.string().max(200).optional(),
-  })).min(1).max(50),
-});

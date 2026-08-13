@@ -181,8 +181,6 @@ export const errorGroups = sqliteTable('error_groups', {
   ignoreReason: text('ignore_reason'),
   sampleRequestId: text('sample_request_id'),
   sampleTraceId: text('sample_trace_id'),
-  grafanaLogsUrl: text('grafana_logs_url'),
-  grafanaTraceUrl: text('grafana_trace_url'),
   samplePayload: text('sample_payload'),
   lastRelease: text('last_release'),
   lastRegressionAt: text('last_regression_at'),
@@ -206,23 +204,6 @@ export const errorGroupOccurrences = sqliteTable('error_group_occurrences', {
   createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
 }, (table) => [
   index('idx_error_occurrences_group_created').on(table.errorGroupId, table.createdAt),
-]);
-
-export const scoutBridgeJobs = sqliteTable('scout_bridge_jobs', {
-  id: text('id').primaryKey(),
-  eventId: text('event_id').notNull(),
-  source: text('source').notNull().default('alertmanager'),
-  status: text('status', { enum: ['pending', 'processing', 'delivered', 'failed', 'dead'] }).notNull().default('pending'),
-  attempts: integer('attempts').notNull().default(0),
-  nextAttemptAt: text('next_attempt_at').notNull(),
-  processingStartedAt: text('processing_started_at'),
-  lastError: text('last_error'),
-  payload: text('payload').notNull(),
-  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
-  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
-}, (table) => [
-  uniqueIndex('idx_scout_bridge_jobs_event_unique').on(table.eventId),
-  index('idx_scout_bridge_jobs_status_next').on(table.status, table.nextAttemptAt),
 ]);
 
 export const emailDigestDeliveries = sqliteTable('email_digest_deliveries', {
@@ -294,7 +275,6 @@ export type ScoutItemLink = typeof scoutItemLinks.$inferSelect;
 export type ErrorGroup = typeof errorGroups.$inferSelect;
 export type NewErrorGroup = typeof errorGroups.$inferInsert;
 export type ErrorGroupOccurrence = typeof errorGroupOccurrences.$inferSelect;
-export type ScoutBridgeJob = typeof scoutBridgeJobs.$inferSelect;
 export type EmailDigestDelivery = typeof emailDigestDeliveries.$inferSelect;
 export type AuditLogEntry = typeof auditLog.$inferSelect;
 export type Webhook = typeof webhooks.$inferSelect;

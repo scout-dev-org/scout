@@ -1,7 +1,7 @@
 import { and, count, desc, eq, inArray, lt, lte } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
-import { errorGroupOccurrences, errorGroups, projects, scoutBridgeJobs, scoutItems, type ErrorGroup } from '../db/schema.js';
+import { errorGroupOccurrences, errorGroups, projects, scoutItems, type ErrorGroup } from '../db/schema.js';
 import { ConflictError, NotFoundError } from '../lib/errors.js';
 import { eventBus } from '../lib/event-bus.js';
 import { logger } from '../lib/logger.js';
@@ -37,8 +37,6 @@ type ErrorUpsertInput = {
   occurredAt?: string;
   sampleRequestId?: string;
   sampleTraceId?: string;
-  grafanaLogsUrl?: string;
-  grafanaTraceUrl?: string;
   samplePayload?: Record<string, unknown>;
   title?: string;
   message?: string;
@@ -50,31 +48,9 @@ const SECRET_VALUE_PATTERN = /(Bearer\s+)[A-Za-z0-9._~+/=-]+|((?:authorization|c
 const DEFAULT_SAMPLE_JSON_LENGTH = 20_000;
 const DEFAULT_OCCURRENCE_LIMIT = 100;
 const DEFAULT_REGRESSION_COOLDOWN_MS = 30 * 60 * 1000;
-const DEFAULT_BRIDGE_BATCH_SIZE = 20;
-const DEFAULT_BRIDGE_INTERVAL_MS = 30_000;
-const DEFAULT_BRIDGE_MAX_ATTEMPTS = 10;
-const DEFAULT_BRIDGE_BACKOFF_BASE_MS = 30_000;
-const DEFAULT_BRIDGE_BACKOFF_MAX_MS = 60 * 60 * 1000;
 const DEFAULT_AUTO_RESOLVE_DAYS = 7;
 const DEFAULT_MAINTENANCE_INTERVAL_MS = 60 * 60 * 1000;
-const DEFAULT_TEMPO_SEARCH_WINDOW_MS = 15 * 60 * 1000;
-const DEFAULT_TEMPO_TIMEOUT_MS = 2_000;
-const MAX_TEMPO_SPANS = 8;
 const AUTO_ACCEPTED_RUNTIME_ITEM_NOTE = 'Auto-accepted system observability item. See linked runtime error group for operational details.';
-
-type TempoSearchTrace = {
-  traceID?: string;
-  rootServiceName?: string;
-  rootTraceName?: string;
-  startTimeUnixNano?: string;
-  durationMs?: number;
-};
-
-type TempoSearchResponse = { traces?: TempoSearchTrace[] };
-type TempoTraceResponse = { batches?: TempoBatch[] };
-type TempoBatch = { resource?: { attributes?: TempoAttribute[] }; scopeSpans?: Array<{ spans?: TempoSpan[] }> };
-type TempoSpan = { name?: string; kind?: string; startTimeUnixNano?: string; endTimeUnixNano?: string; attributes?: TempoAttribute[]; status?: Record<string, unknown> };
-type TempoAttribute = { key?: string; value?: Record<string, unknown> };
 
 function now(): string {
   return new Date().toISOString();
@@ -115,219 +91,9 @@ function redact(value: unknown): unknown {
   return result;
 }
 
-function buildGrafanaExploreUrl(generatorUrl: unknown): string | undefined {
-  if (typeof generatorUrl !== 'string' || generatorUrl.trim() === '') return undefined;
-  const grafanaBase = process.env.SCOUT_GRAFANA_URL?.trim() || process.env.GRAFANA_PUBLIC_URL?.trim();
-  if (!grafanaBase) return generatorUrl;
 
-  try {
-    const source = new URL(generatorUrl);
-    const expr = source.searchParams.get('g0.expr');
-    if (!expr) return generatorUrl;
 
-    const target = new URL('/explore', grafanaBase.endsWith('/') ? grafanaBase : `${grafanaBase}/`);
-    target.searchParams.set('orgId', '1');
-    target.searchParams.set('left', JSON.stringify({
-      datasource: 'Prometheus',
-      queries: [{ refId: 'A', expr }],
-      range: { from: 'now-1h', to: 'now' },
-    }));
-    return target.toString();
-  } catch {
-    return generatorUrl;
-  }
-}
 
-function buildGrafanaTraceUrl(traceId: string): string | undefined {
-  const grafanaBase = process.env.SCOUT_GRAFANA_URL?.trim() || process.env.GRAFANA_PUBLIC_URL?.trim();
-  if (!grafanaBase) return undefined;
-
-  const datasource = process.env.SCOUT_GRAFANA_TEMPO_DATASOURCE?.trim() || 'Tempo';
-  try {
-    const target = new URL('/explore', grafanaBase.endsWith('/') ? grafanaBase : `${grafanaBase}/`);
-    target.searchParams.set('orgId', '1');
-    target.searchParams.set('left', JSON.stringify({
-      datasource,
-      queries: [{ refId: 'A', query: traceId, queryType: 'traceid' }],
-      range: { from: 'now-6h', to: 'now' },
-    }));
-    return target.toString();
-  } catch {
-    return undefined;
-  }
-}
-
-function firstString(...values: unknown[]): string | undefined {
-  for (const value of values) {
-    if (typeof value === 'string' && value.trim() !== '') return value.trim();
-  }
-  return undefined;
-}
-
-function firstUrl(...values: unknown[]): string | undefined {
-  const value = firstString(...values);
-  if (!value) return undefined;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function parseStatusCode(value: unknown): number | undefined {
-  const raw = firstString(value);
-  if (!raw) return undefined;
-  const statusCode = Number(raw);
-  return Number.isInteger(statusCode) && statusCode >= 100 && statusCode <= 599 ? statusCode : undefined;
-}
-
-function routeTemplateToHttpTarget(routeTemplate: string | undefined): string | undefined {
-  if (!routeTemplate) return undefined;
-  let value = routeTemplate.trim();
-  if (value.startsWith('^')) value = value.slice(1);
-  if (value.endsWith('$')) value = value.slice(0, -1);
-  value = value.replace(/\\\//g, '/');
-  if (!value.startsWith('/') || /[()[\]{}+?|]/.test(value)) return undefined;
-  return value;
-}
-
-function tempoStatusCandidates(input: ErrorUpsertInput): number[] {
-  if (input.statusCode) return [input.statusCode];
-  if (input.statusClass === '5xx') return [500, 502, 503, 504];
-  if (input.statusClass === '4xx') return [400, 401, 403, 404, 429];
-  return [];
-}
-
-function tempoAttributeValue(attribute: TempoAttribute): unknown {
-  const value = attribute.value;
-  if (!value || typeof value !== 'object') return undefined;
-  if ('stringValue' in value) return value.stringValue;
-  if ('intValue' in value) return Number(value.intValue);
-  if ('doubleValue' in value) return Number(value.doubleValue);
-  if ('boolValue' in value) return Boolean(value.boolValue);
-  if ('arrayValue' in value || 'kvlistValue' in value) return value;
-  return undefined;
-}
-
-function tempoAttributesMap(attributes: TempoAttribute[] | undefined): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const attribute of attributes ?? []) {
-    if (!attribute.key) continue;
-    const value = tempoAttributeValue(attribute);
-    if (value !== undefined) result[attribute.key] = value;
-  }
-  return result;
-}
-
-function summarizeTempoTrace(trace: TempoTraceResponse, searchTrace: TempoSearchTrace): Record<string, unknown> {
-  const gatewaySpans: Array<Record<string, unknown>> = [];
-  const otherSpans: Array<Record<string, unknown>> = [];
-  for (const batch of trace.batches ?? []) {
-    const resource = tempoAttributesMap(batch.resource?.attributes);
-    for (const scopeSpan of batch.scopeSpans ?? []) {
-      for (const span of scopeSpan.spans ?? []) {
-        const attributes = tempoAttributesMap(span.attributes);
-        const attributeKeys = Object.keys(attributes);
-        const hasGatewayAttributes = attributeKeys.some((key) => key.startsWith('gateway.'));
-        const hasDiagnosticAttributes = hasGatewayAttributes || attributeKeys.some((key) => (
-          key.startsWith('http.')
-          || key.startsWith('exception.')
-          || key.startsWith('db.')
-          || key.startsWith('net.')
-          || key === 'route_template'
-          || key === 'error_type'
-          || key === 'upstream_service'
-        ));
-        if (!hasDiagnosticAttributes && !span.status) continue;
-        const summary = {
-          name: span.name,
-          kind: span.kind,
-          startTimeUnixNano: span.startTimeUnixNano,
-          endTimeUnixNano: span.endTimeUnixNano,
-          status: span.status,
-          resource,
-          attributes,
-        };
-        if (hasGatewayAttributes) gatewaySpans.push(summary);
-        else if (otherSpans.length < MAX_TEMPO_SPANS) otherSpans.push(summary);
-      }
-    }
-  }
-  const spans = [...gatewaySpans, ...otherSpans].slice(0, MAX_TEMPO_SPANS);
-
-  return {
-    traceID: searchTrace.traceID,
-    rootServiceName: searchTrace.rootServiceName,
-    rootTraceName: searchTrace.rootTraceName,
-    startTimeUnixNano: searchTrace.startTimeUnixNano,
-    durationMs: searchTrace.durationMs,
-    spans,
-  };
-}
-
-async function fetchTempoJson<T>(url: URL, timeoutMs: number): Promise<T> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) throw new Error(`Tempo returned ${response.status}`);
-    return await response.json() as T;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function enrichFromTempo(input: ErrorUpsertInput): Promise<ErrorUpsertInput> {
-  const tempoBase = process.env.SCOUT_TEMPO_URL?.trim();
-  if (!tempoBase || input.sampleTraceId) return input;
-
-  const occurredAt = Date.parse(input.occurredAt || now());
-  if (!Number.isFinite(occurredAt)) return input;
-
-  const timeoutMs = getEnvInt('SCOUT_TEMPO_TIMEOUT_MS', DEFAULT_TEMPO_TIMEOUT_MS, 100, 30_000);
-  const windowMs = getEnvInt('SCOUT_TEMPO_SEARCH_WINDOW_MS', DEFAULT_TEMPO_SEARCH_WINDOW_MS, 1_000, 24 * 60 * 60 * 1000);
-  const statusCandidates = tempoStatusCandidates(input);
-  const target = routeTemplateToHttpTarget(input.routeTemplate);
-  const tagParts = [`service.name=${input.service}`];
-  if (input.environment) tagParts.push(`deployment.environment=${input.environment}`);
-  if (input.method) tagParts.push(`http.method=${input.method}`);
-  if (target) tagParts.push(`http.target=${target}`);
-  const candidates = statusCandidates.length > 0 ? statusCandidates.map((status) => [...tagParts, `http.status_code=${status}`]) : [tagParts];
-
-  try {
-    const base = new URL(tempoBase.endsWith('/') ? tempoBase : `${tempoBase}/`);
-    for (const tags of candidates) {
-      const searchUrl = new URL('/api/search', base);
-      searchUrl.searchParams.set('tags', tags.join(' '));
-      searchUrl.searchParams.set('start', String(Math.floor((occurredAt - windowMs) / 1000)));
-      searchUrl.searchParams.set('end', String(Math.ceil((occurredAt + windowMs) / 1000)));
-      searchUrl.searchParams.set('limit', '1');
-      const search = await fetchTempoJson<TempoSearchResponse>(searchUrl, timeoutMs);
-      const trace = search.traces?.find((item) => typeof item.traceID === 'string' && item.traceID.trim() !== '');
-      if (!trace?.traceID) continue;
-
-      const traceUrl = new URL(`/api/traces/${encodeURIComponent(trace.traceID)}`, base);
-      const traceBody = await fetchTempoJson<TempoTraceResponse>(traceUrl, timeoutMs);
-      return {
-        ...input,
-        sampleTraceId: trace.traceID,
-        grafanaTraceUrl: input.grafanaTraceUrl ?? buildGrafanaTraceUrl(trace.traceID),
-        samplePayload: {
-          ...(input.samplePayload ?? {}),
-          tempo: {
-            searchTags: tags,
-            trace: summarizeTempoTrace(traceBody, trace),
-          },
-        },
-      };
-    }
-  } catch {
-    return input;
-  }
-
-  return input;
-}
 
 export function resolveErrorProjectId(input: ErrorUpsertInput): string {
   const project = db.select({ id: projects.id }).from(projects).where(eq(projects.id, input.projectId)).get();
@@ -335,12 +101,6 @@ export function resolveErrorProjectId(input: ErrorUpsertInput): string {
   return project.id;
 }
 
-function resolveBridgeProjectId(labels: Record<string, unknown>): string {
-  const slug = firstString(labels.project, labels.project_slug) ?? 'avtozor';
-  const project = db.select({ id: projects.id }).from(projects).where(eq(projects.slug, slug)).get();
-  if (!project) throw new NotFoundError('Project', 'PROJECT_NOT_FOUND');
-  return project.id;
-}
 
 function buildItemMessage(input: ErrorUpsertInput): string {
   const title = input.title || `[${input.environment}][${input.service}] ${input.errorType}`;
@@ -358,8 +118,6 @@ function buildItemMessage(input: ErrorUpsertInput): string {
   if (input.upstreamService) lines.push(`Upstream: ${input.upstreamService}`);
   if (input.sampleRequestId) lines.push(`Request ID: ${input.sampleRequestId}`);
   if (input.sampleTraceId) lines.push(`Trace ID: ${input.sampleTraceId}`);
-  if (input.grafanaLogsUrl) lines.push(`Grafana logs: ${input.grafanaLogsUrl}`);
-  if (input.grafanaTraceUrl) lines.push(`Grafana trace: ${input.grafanaTraceUrl}`);
   return lines.join('\n');
 }
 
@@ -431,8 +189,6 @@ export function upsertErrorGroup(input: ErrorUpsertInput, resolvedProjectId?: st
         linkedItemId: itemId,
         sampleRequestId: input.sampleRequestId ?? null,
         sampleTraceId: input.sampleTraceId ?? null,
-        grafanaLogsUrl: input.grafanaLogsUrl ?? null,
-        grafanaTraceUrl: input.grafanaTraceUrl ?? null,
         samplePayload,
         lastRelease: input.release ?? null,
         createdAt: timestamp,
@@ -468,8 +224,6 @@ export function upsertErrorGroup(input: ErrorUpsertInput, resolvedProjectId?: st
       severity: input.severity,
       sampleRequestId: input.sampleRequestId ?? existing.sampleRequestId,
       sampleTraceId: input.sampleTraceId ?? existing.sampleTraceId,
-      grafanaLogsUrl: input.grafanaLogsUrl ?? existing.grafanaLogsUrl,
-      grafanaTraceUrl: input.grafanaTraceUrl ?? existing.grafanaTraceUrl,
       samplePayload: samplePayload ?? existing.samplePayload,
       lastRelease: input.release ?? existing.lastRelease,
       lastRegressionAt: recordRegression ? timestamp : existing.lastRegressionAt,
@@ -631,115 +385,6 @@ export function resolveStaleErrorGroups(currentTime = now()): ErrorGroup[] {
   db.update(errorGroups).set({ state: 'resolved', updatedAt: currentTime }).where(inArray(errorGroups.id, staleIds)).run();
 
   return db.select().from(errorGroups).where(inArray(errorGroups.id, staleIds)).all();
-}
-
-export function enqueueBridgeJob(payload: unknown): { id: string; eventId: string; inserted: boolean } {
-  const body = JSON.stringify(redact(payload));
-  const eventId = createHash('sha256').update(body).digest('hex');
-  const existing = db.select().from(scoutBridgeJobs).where(eq(scoutBridgeJobs.eventId, eventId)).get();
-  if (existing) return { id: existing.id, eventId, inserted: false };
-  const id = randomUUID();
-  db.insert(scoutBridgeJobs).values({ id, eventId, payload: body, nextAttemptAt: now(), createdAt: now(), updatedAt: now() }).run();
-  return { id, eventId, inserted: true };
-}
-
-export function normalizeAlertmanagerPayload(payload: any): ErrorUpsertInput[] {
-  return payload.alerts
-    .filter((alert: any) => alert.status === 'firing')
-    .map((alert: any) => {
-      const labels = { ...(payload.commonLabels || {}), ...(alert.labels || {}) };
-      const annotations = { ...(payload.commonAnnotations || {}), ...(alert.annotations || {}) };
-      const env = labels.env || labels.environment || 'unknown';
-      const service = labels.service || labels.job || 'unknown';
-      const alertname = labels.alertname || 'AlertmanagerAlert';
-      const fingerprint = alert.fingerprint || createHash('sha256').update(`${env}|${service}|${alertname}|${labels.route_template || ''}|${labels.error_type || ''}`).digest('hex');
-      const explicitLogsUrl = firstUrl(annotations.grafana_logs_url, annotations.logs_url, labels.grafana_logs_url, labels.logs_url);
-      return {
-        projectId: resolveBridgeProjectId(labels),
-        source: 'alertmanager',
-        fingerprint,
-        environment: env,
-        service,
-        routeTemplate: labels.route_template,
-        method: labels.method,
-        upstreamService: labels.upstream_service,
-        errorType: labels.error_type || alertname,
-        statusCode: parseStatusCode(labels.status_code || labels.statusCode),
-        statusClass: labels.status_class,
-        severity: labels.severity === 'critical' ? 'critical' : labels.severity === 'info' ? 'info' : 'warning',
-        occurredAt: alert.startsAt && !Number.isNaN(Date.parse(alert.startsAt)) ? new Date(alert.startsAt).toISOString() : now(),
-        sampleRequestId: firstString(labels.request_id, labels.requestId, annotations.request_id, annotations.requestId),
-        sampleTraceId: firstString(labels.trace_id, labels.traceId, labels.traceID, annotations.trace_id, annotations.traceId, annotations.traceID),
-        grafanaLogsUrl: explicitLogsUrl || buildGrafanaExploreUrl(alert.generatorURL),
-        grafanaTraceUrl: firstUrl(annotations.grafana_trace_url, annotations.trace_url, labels.grafana_trace_url, labels.trace_url),
-        title: `[${env}][${service}] ${alertname}`,
-        message: annotations.summary || annotations.description,
-        release: labels.release || labels.deploy_sha || labels.deployment_sha,
-        samplePayload: { labels, annotations, status: alert.status, groupKey: payload.groupKey, externalURL: payload.externalURL },
-      };
-    });
-}
-
-export async function processBridgeJobs(limit = DEFAULT_BRIDGE_BATCH_SIZE, currentTime = now()): Promise<{ processed: number; failed: number; dead: number }> {
-  const jobs = db.select().from(scoutBridgeJobs)
-    .where(and(eq(scoutBridgeJobs.status, 'pending'), lte(scoutBridgeJobs.nextAttemptAt, currentTime)))
-    .limit(limit)
-    .all();
-  let processed = 0;
-  let failed = 0;
-  let dead = 0;
-  for (const job of jobs) {
-    try {
-      db.update(scoutBridgeJobs).set({ status: 'processing', attempts: job.attempts + 1, processingStartedAt: now(), updatedAt: now() }).where(eq(scoutBridgeJobs.id, job.id)).run();
-      const payload = JSON.parse(job.payload);
-      for (const event of normalizeAlertmanagerPayload(payload)) upsertErrorGroup(await enrichFromTempo(event));
-      db.update(scoutBridgeJobs).set({ status: 'delivered', processingStartedAt: null, lastError: null, updatedAt: now() }).where(eq(scoutBridgeJobs.id, job.id)).run();
-      processed++;
-    } catch (error) {
-      const attempts = job.attempts + 1;
-      const maxAttempts = getEnvInt('SCOUT_ERROR_BRIDGE_MAX_ATTEMPTS', DEFAULT_BRIDGE_MAX_ATTEMPTS, 1, 100);
-      const status = attempts >= maxAttempts ? 'dead' : 'pending';
-      const delayMs = Math.min(
-        getEnvInt('SCOUT_ERROR_BRIDGE_BACKOFF_MAX_MS', DEFAULT_BRIDGE_BACKOFF_MAX_MS, 1_000, 24 * 60 * 60 * 1000),
-        getEnvInt('SCOUT_ERROR_BRIDGE_BACKOFF_BASE_MS', DEFAULT_BRIDGE_BACKOFF_BASE_MS, 1_000, 60 * 60 * 1000) * 2 ** Math.max(0, attempts - 1),
-      );
-      const currentTimestamp = Date.parse(currentTime);
-      const next = new Date((Number.isFinite(currentTimestamp) ? currentTimestamp : Date.now()) + delayMs).toISOString();
-      db.update(scoutBridgeJobs).set({ status, attempts, nextAttemptAt: next, processingStartedAt: null, lastError: String(error).slice(0, 1000), updatedAt: now() }).where(eq(scoutBridgeJobs.id, job.id)).run();
-      if (status === 'dead') dead++;
-      else failed++;
-    }
-  }
-  return { processed, failed, dead };
-}
-
-function countBridgeJobs(status: 'pending' | 'processing' | 'delivered' | 'dead'): number {
-  return db.select({ total: count() }).from(scoutBridgeJobs).where(eq(scoutBridgeJobs.status, status)).get()?.total ?? 0;
-}
-
-export function getBridgeStatus(currentTime = now()) {
-  const due = db.select({ total: count() }).from(scoutBridgeJobs)
-    .where(and(eq(scoutBridgeJobs.status, 'pending'), lte(scoutBridgeJobs.nextAttemptAt, currentTime)))
-    .get()?.total ?? 0;
-  return {
-    pending: countBridgeJobs('pending'),
-    pendingDue: due,
-    processing: countBridgeJobs('processing'),
-    delivered: countBridgeJobs('delivered'),
-    dead: countBridgeJobs('dead'),
-  };
-}
-
-export function startBridgeWorker(): () => void {
-  if (process.env.SCOUT_ERROR_BRIDGE_WORKER_ENABLED === 'false') return () => {};
-  const intervalMs = getEnvInt('SCOUT_ERROR_BRIDGE_WORKER_INTERVAL_MS', DEFAULT_BRIDGE_INTERVAL_MS, 1_000, 60 * 60 * 1000);
-  const batchSize = getEnvInt('SCOUT_ERROR_BRIDGE_BATCH_SIZE', DEFAULT_BRIDGE_BATCH_SIZE, 1, 1_000);
-  const timer = setInterval(() => {
-    processBridgeJobs(batchSize).catch(() => {});
-  }, intervalMs);
-  timer.unref?.();
-  processBridgeJobs(batchSize).catch(() => {});
-  return () => clearInterval(timer);
 }
 
 export function startErrorMaintenanceWorker(): () => void {
