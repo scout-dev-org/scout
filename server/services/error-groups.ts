@@ -1,9 +1,10 @@
-import { and, count, desc, eq, inArray, lte } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, lt, lte } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
 import { errorGroupOccurrences, errorGroups, projects, scoutBridgeJobs, scoutItems, type ErrorGroup } from '../db/schema.js';
 import { ConflictError, NotFoundError } from '../lib/errors.js';
 import { eventBus } from '../lib/event-bus.js';
+import { logger } from '../lib/logger.js';
 import { logAudit } from './audit.js';
 import { isSqliteBusyError, nextItemUpdatedAt, type DbOrTx } from './items.js';
 import { dispatchWebhooks } from './webhooks.js';
@@ -42,7 +43,6 @@ type ErrorUpsertInput = {
   title?: string;
   message?: string;
   release?: string;
-  cooldownKey?: string;
 };
 
 const SECRET_KEY_PATTERN = /(authorization|cookie|token|password|secret|key|credential|jwt)/i;
@@ -55,6 +55,8 @@ const DEFAULT_BRIDGE_INTERVAL_MS = 30_000;
 const DEFAULT_BRIDGE_MAX_ATTEMPTS = 10;
 const DEFAULT_BRIDGE_BACKOFF_BASE_MS = 30_000;
 const DEFAULT_BRIDGE_BACKOFF_MAX_MS = 60 * 60 * 1000;
+const DEFAULT_AUTO_RESOLVE_DAYS = 7;
+const DEFAULT_MAINTENANCE_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_TEMPO_SEARCH_WINDOW_MS = 15 * 60 * 1000;
 const DEFAULT_TEMPO_TIMEOUT_MS = 2_000;
 const MAX_TEMPO_SPANS = 8;
@@ -606,6 +608,31 @@ export function unignoreErrorGroup(id: string): ErrorGroup {
   return db.select().from(errorGroups).where(eq(errorGroups.id, id)).get()!;
 }
 
+/**
+ * Close the groups nothing has reported for a while.
+ *
+ * An error that stopped happening is not open work, and a list that keeps every error ever seen
+ * stops being read. A recurrence puts the group straight back to `active` through the upsert path,
+ * and the gap counts as a regression, so closing early costs nothing.
+ *
+ * `ignored` groups are left alone: their state is a deliberate decision with its own expiry.
+ */
+export function resolveStaleErrorGroups(currentTime = now()): ErrorGroup[] {
+  const days = getEnvInt('SCOUT_ERROR_AUTO_RESOLVE_DAYS', DEFAULT_AUTO_RESOLVE_DAYS, 0, 3650);
+  if (days === 0) return [];
+
+  const threshold = new Date(Date.parse(currentTime) - days * 24 * 60 * 60 * 1000).toISOString();
+  const stale = db.select().from(errorGroups)
+    .where(and(eq(errorGroups.state, 'active'), lt(errorGroups.lastSeenAt, threshold)))
+    .all();
+  if (stale.length === 0) return [];
+
+  const staleIds = stale.map((group) => group.id);
+  db.update(errorGroups).set({ state: 'resolved', updatedAt: currentTime }).where(inArray(errorGroups.id, staleIds)).run();
+
+  return db.select().from(errorGroups).where(inArray(errorGroups.id, staleIds)).all();
+}
+
 export function enqueueBridgeJob(payload: unknown): { id: string; eventId: string; inserted: boolean } {
   const body = JSON.stringify(redact(payload));
   const eventId = createHash('sha256').update(body).digest('hex');
@@ -712,5 +739,30 @@ export function startBridgeWorker(): () => void {
   }, intervalMs);
   timer.unref?.();
   processBridgeJobs(batchSize).catch(() => {});
+  return () => clearInterval(timer);
+}
+
+export function startErrorMaintenanceWorker(): () => void {
+  const intervalMs = getEnvInt('SCOUT_ERROR_MAINTENANCE_INTERVAL_MS', DEFAULT_MAINTENANCE_INTERVAL_MS, 60_000, 24 * 60 * 60 * 1000);
+  const run = (): void => {
+    let resolved: ErrorGroup[];
+    try {
+      resolved = resolveStaleErrorGroups();
+    } catch (err) {
+      logger.error({ err }, 'Scout error group auto-resolve failed');
+      return;
+    }
+    if (resolved.length === 0) return;
+
+    logger.info({ resolvedCount: resolved.length }, 'Scout resolved stale error groups');
+    for (const errorGroup of resolved) {
+      dispatchWebhooks(errorGroup.projectId, 'error_group.updated', { errorGroup }).catch(() => {});
+      eventBus.publish({ type: 'error_group.updated', projectId: errorGroup.projectId, payload: { errorGroup } });
+    }
+  };
+
+  const timer = setInterval(run, intervalMs);
+  timer.unref?.();
+  run();
   return () => clearInterval(timer);
 }

@@ -354,7 +354,6 @@ export const errorUpsertSchema = z.object({
   title: z.string().max(240).optional(),
   message: z.string().max(4000).optional(),
   release: z.string().max(120).optional(),
-  cooldownKey: z.string().max(120).optional(),
 });
 
 export const listErrorGroupsSchema = paginationSchema.extend({

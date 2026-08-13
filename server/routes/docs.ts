@@ -1992,7 +1992,6 @@ const spec = {
                   title: { type: 'string', maxLength: 240 },
                   message: { type: 'string', maxLength: 4000 },
                   release: { type: 'string', maxLength: 120 },
-                  cooldownKey: { type: 'string', maxLength: 120 },
                 },
               },
             },
@@ -2009,7 +2008,7 @@ const spec = {
       post: {
         tags: ['Error Integrations'],
         summary: 'List runtime error groups',
-        description: 'Lists error groups for a project. Requires project access or API key scope `items:read`/project match.',
+        description: 'Lists error groups for a project. Groups with no new occurrence for `SCOUT_ERROR_AUTO_RESOLVE_DAYS` days become `resolved` on their own, and a recurrence returns them to `active`. Requires project access or API key scope `items:read`/project match.',
         security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
         requestBody: {
           required: true,

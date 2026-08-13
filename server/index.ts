@@ -13,7 +13,7 @@ import { notificationRoutes } from './routes/notifications.js';
 import { apiKeyRoutes } from './routes/api-keys.js';
 import { integrationsErrorsRoutes } from './routes/integrations-errors.js';
 import { grafanaProxyRoutes } from './routes/grafana-proxy.js';
-import { startBridgeWorker } from './services/error-groups.js';
+import { startBridgeWorker, startErrorMaintenanceWorker } from './services/error-groups.js';
 import { startDailyDigestWorker } from './services/email-digest.js';
 import { eventRoutes } from './routes/events.js';
 import { docsRoutes } from './routes/docs.js';
@@ -386,12 +386,14 @@ serve({ fetch: app.fetch, port }, (info) => {
 });
 
 const stopBridgeWorker = startBridgeWorker();
+const stopErrorMaintenanceWorker = startErrorMaintenanceWorker();
 const stopDailyDigestWorker = startDailyDigestWorker();
 
 // Graceful shutdown
 function shutdown() {
   logger.info('Shutting down');
   stopBridgeWorker();
+  stopErrorMaintenanceWorker();
   stopDailyDigestWorker();
   sqlite.close();
   process.exit(0);

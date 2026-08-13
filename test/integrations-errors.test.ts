@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { integrationsErrorsRoutes } from '../server/routes/integrations-errors.js';
-import { enqueueBridgeJob, getBridgeStatus, processBridgeJobs, upsertErrorGroup } from '../server/services/error-groups.js';
+import { enqueueBridgeJob, getBridgeStatus, ignoreErrorGroup, processBridgeJobs, resolveStaleErrorGroups, upsertErrorGroup } from '../server/services/error-groups.js';
 import { createTestContext, type TestContext } from './helpers.js';
 import { apiKeys, auditLog, errorGroupOccurrences, errorGroups, projects, scoutBridgeJobs, scoutItems } from '../server/db/schema.js';
 import { eventBus, type SSEEvent } from '../server/lib/event-bus.js';
@@ -328,6 +328,48 @@ describe('Error integrations routes', () => {
     const occurrences = ctx.db.select().from(errorGroupOccurrences).where(eq(errorGroupOccurrences.errorGroupId, group.id)).all();
     expect(occurrences).toHaveLength(2);
     expect(occurrences.map((occurrence) => occurrence.requestId).sort()).toEqual(['req-3', 'req-4']);
+  });
+
+  it('resolves a group nothing has reported for longer than the window', async () => {
+    vi.stubEnv('SCOUT_ERROR_AUTO_RESOLVE_DAYS', '7');
+    upsertErrorGroup({ ...basePayload, projectId: ctx.projectId, occurredAt: '2026-01-01T00:00:00.000Z' }, ctx.projectId);
+
+    const resolved = resolveStaleErrorGroups('2026-02-01T00:00:00.000Z');
+
+    expect(resolved).toHaveLength(1);
+    expect(ctx.db.select().from(errorGroups).get()!.state).toBe('resolved');
+  });
+
+  it('leaves recent and ignored groups untouched', async () => {
+    vi.stubEnv('SCOUT_ERROR_AUTO_RESOLVE_DAYS', '7');
+    upsertErrorGroup({ ...basePayload, projectId: ctx.projectId, fingerprint: 'recent', occurredAt: '2026-01-31T00:00:00.000Z' }, ctx.projectId);
+    const stale = upsertErrorGroup({ ...basePayload, projectId: ctx.projectId, fingerprint: 'stale', occurredAt: '2026-01-01T00:00:00.000Z' }, ctx.projectId);
+    ignoreErrorGroup(stale.id, 'known noise');
+
+    expect(resolveStaleErrorGroups('2026-02-01T00:00:00.000Z')).toHaveLength(0);
+    expect(ctx.db.select().from(errorGroups).where(eq(errorGroups.fingerprint, 'recent')).get()!.state).toBe('active');
+    expect(ctx.db.select().from(errorGroups).where(eq(errorGroups.fingerprint, 'stale')).get()!.state).toBe('ignored');
+  });
+
+  it('returns a resolved group to active on recurrence and records the regression', async () => {
+    vi.stubEnv('SCOUT_ERROR_AUTO_RESOLVE_DAYS', '7');
+    upsertErrorGroup({ ...basePayload, projectId: ctx.projectId, occurredAt: '2026-01-01T00:00:00.000Z' }, ctx.projectId);
+    resolveStaleErrorGroups('2026-02-01T00:00:00.000Z');
+
+    upsertErrorGroup({ ...basePayload, projectId: ctx.projectId, occurredAt: '2026-02-01T00:00:00.000Z' }, ctx.projectId);
+
+    const group = ctx.db.select().from(errorGroups).get()!;
+    expect(group.state).toBe('active');
+    expect(group.occurrenceCount).toBe(2);
+    expect(group.lastRegressionAt).toBe('2026-02-01T00:00:00.000Z');
+  });
+
+  it('keeps every group when the auto-resolve window is zero', async () => {
+    vi.stubEnv('SCOUT_ERROR_AUTO_RESOLVE_DAYS', '0');
+    upsertErrorGroup({ ...basePayload, projectId: ctx.projectId, occurredAt: '2026-01-01T00:00:00.000Z' }, ctx.projectId);
+
+    expect(resolveStaleErrorGroups('2026-02-01T00:00:00.000Z')).toHaveLength(0);
+    expect(ctx.db.select().from(errorGroups).get()!.state).toBe('active');
   });
 
   it('rejects bridge webhook when secret is not configured', async () => {
