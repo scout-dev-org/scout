@@ -143,7 +143,8 @@ describe('Daily email digest', () => {
       assigneeId: ctx.developerId,
       resolvedById: ctx.developerId,
       createdAt: '2026-05-01 10:00:00',
-      updatedAt: '2026-05-02 10:00:00',
+      updatedAt: '2026-06-05 10:00:00',
+      resolvedAt: '2026-06-05 10:00:00',
     }).run();
     const sendMail = vi.fn(async () => ({ messageId: randomUUID() }));
 
@@ -160,6 +161,45 @@ describe('Daily email digest', () => {
     expect(mail.html).toContain(`href="https://scout.test.local/items/${itemId}"`);
     expect(mail.html).toContain('Баг · Критический · Test Project');
     delete process.env.SCOUT_PUBLIC_URL;
+  });
+
+  it('lists only recently finished work and counts the older backlog', async () => {
+    const recentId = randomUUID();
+    const staleId = randomUUID();
+    ctx.db.insert(scoutItems).values([
+      {
+        id: recentId,
+        projectId: ctx.projectId,
+        message: 'Свежая задача на приёмку',
+        status: 'done',
+        reporterId: ctx.memberId,
+        resolvedById: ctx.developerId,
+        createdAt: '2026-06-01 10:00:00',
+        updatedAt: '2026-06-08 10:00:00',
+        resolvedAt: '2026-06-08 10:00:00',
+      },
+      {
+        id: staleId,
+        projectId: ctx.projectId,
+        message: 'Старая задача из бэклога',
+        status: 'done',
+        reporterId: ctx.memberId,
+        resolvedById: ctx.developerId,
+        createdAt: '2026-01-10 10:00:00',
+        updatedAt: '2026-01-11 10:00:00',
+        resolvedAt: '2026-01-11 10:00:00',
+      },
+    ]).run();
+    const sendMail = vi.fn(async () => ({ messageId: randomUUID() }));
+
+    const result = await sendDailyDigests({ date: '2026-06-09', transport: { sendMail } as any });
+
+    expect(result.summaries[0]).toMatchObject({ pendingAcceptanceCount: 1 });
+    const mail = sendMail.mock.calls[0][0] as any;
+    expect(mail.text).toContain('Свежая задача на приёмку');
+    expect(mail.text).not.toContain('Старая задача из бэклога');
+    expect(mail.text).toContain('Дольше недели приёмки ждут ещё 1 задача');
+    expect(mail.html).toContain('Дольше недели приёмки ждут ещё 1 задача');
   });
 
   it('translates statuses in the daily section', async () => {

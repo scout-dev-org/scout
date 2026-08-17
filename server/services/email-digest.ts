@@ -31,6 +31,8 @@ type ActionItem = {
 type RecipientActions = {
   pendingAcceptance: ActionItem[];
   changesRequested: ActionItem[];
+  /** Items waiting longer than the action window, reported as a count only. */
+  olderPendingCount: number;
 };
 
 type RecipientDigest = {
@@ -110,6 +112,12 @@ const priorityLabels: Record<string, string> = {
 
 /** How many items each action section lists before collapsing into a counter. */
 const ACTION_LIST_LIMIT = 10;
+
+/**
+ * Only recently finished work is worth a daily nudge. Anything older is a
+ * backlog the reader already knows about, so it collapses into one line.
+ */
+const ACTION_WINDOW_DAYS = 7;
 
 function statusLabel(status: string): string {
   return statusLabels[status as ItemStatus] ?? status;
@@ -306,7 +314,7 @@ function sortActionItems(items: ActionItem[]): ActionItem[] {
  * Items waiting on a person: `done` needs someone who can accept it,
  * `changes_requested` needs the assignee who has to redo the work.
  */
-function getOpenActionsByUser(projectNames: Map<string, string>): Map<string, RecipientActions> {
+function getOpenActionsByUser(projectNames: Map<string, string>, digestDate: string): Map<string, RecipientActions> {
   const waiting = db.select().from(scoutItems)
     .where(inArray(scoutItems.status, ['done', 'changes_requested']))
     .all();
@@ -316,7 +324,7 @@ function getOpenActionsByUser(projectNames: Map<string, string>): Map<string, Re
   const actionsFor = (userId: string): RecipientActions => {
     const existing = actionsByUser.get(userId);
     if (existing) return existing;
-    const created: RecipientActions = { pendingAcceptance: [], changesRequested: [] };
+    const created: RecipientActions = { pendingAcceptance: [], changesRequested: [], olderPendingCount: 0 };
     actionsByUser.set(userId, created);
     return created;
   };
@@ -333,13 +341,18 @@ function getOpenActionsByUser(projectNames: Map<string, string>): Map<string, Re
     return allowed;
   };
 
+  const windowStart = `${addLocalDays(digestDate, -ACTION_WINDOW_DAYS)} 00:00:00`;
+  const isRecent = (item: ScoutItem): boolean => (item.resolvedAt ?? item.updatedAt) >= windowStart;
+
   for (const item of waiting) {
     if (item.status === 'changes_requested') {
-      if (item.assigneeId) actionsFor(item.assigneeId).changesRequested.push(toActionItem(item, projectNames));
+      if (item.assigneeId && isRecent(item)) actionsFor(item.assigneeId).changesRequested.push(toActionItem(item, projectNames));
       continue;
     }
     for (const user of candidates) {
-      if (canAccept(user, item.projectId)) actionsFor(user.id).pendingAcceptance.push(toActionItem(item, projectNames));
+      if (!canAccept(user, item.projectId)) continue;
+      if (isRecent(item)) actionsFor(user.id).pendingAcceptance.push(toActionItem(item, projectNames));
+      else actionsFor(user.id).olderPendingCount += 1;
     }
   }
 
@@ -395,7 +408,7 @@ function buildRecipientDigest(user: User, events: DigestEvent[], digestDate: str
   return digest;
 }
 
-const NO_ACTIONS: RecipientActions = { pendingAcceptance: [], changesRequested: [] };
+const NO_ACTIONS: RecipientActions = { pendingAcceptance: [], changesRequested: [], olderPendingCount: 0 };
 
 function hasContent(digest: RecipientDigest): boolean {
   return digest.itemCount > 0
@@ -414,7 +427,7 @@ function buildDigests(digestDate: string, periodStart: string, periodEnd: string
     ...events.map((event) => event.item.projectId),
     ...openItems.map((item) => item.projectId),
   ]);
-  const actionsByUser = getOpenActionsByUser(projectNames);
+  const actionsByUser = getOpenActionsByUser(projectNames, digestDate);
 
   const eventRecipients = getRecipients(events);
   const known = new Set(eventRecipients.map((user) => user.id));
@@ -513,6 +526,10 @@ function buildDigestText(digest: RecipientDigest): string {
     }
   }
 
+  if (digest.actions.olderPendingCount > 0) {
+    lines.push('', `Дольше недели приёмки ждут ещё ${digest.actions.olderPendingCount} ${plural(digest.actions.olderPendingCount, 'задача', 'задачи', 'задач')} — они не перечислены здесь.`);
+  }
+
   if (digest.itemCount === 0) {
     lines.push('', 'За день изменений по вашим задачам не было.');
   } else {
@@ -590,7 +607,10 @@ function buildDigestHtml(digest: RecipientDigest): string {
   const timeZone = process.env.SCOUT_DAILY_DIGEST_TIMEZONE || DEFAULT_TIME_ZONE;
   const actions = actionSections(digest)
     .map((section) => sectionHtml(section.title, section.hint, section.items))
-    .join('');
+    .join('')
+    + (digest.actions.olderPendingCount > 0
+      ? `<div style="margin:0 0 20px;color:#6b7280;font-size:13px;">Дольше недели приёмки ждут ещё ${digest.actions.olderPendingCount} ${plural(digest.actions.olderPendingCount, 'задача', 'задачи', 'задач')} — они не перечислены здесь.</div>`
+      : '');
 
   const daily = digest.itemCount === 0
     ? `<div style="padding-top:12px;color:#6b7280;font-size:14px;">За день изменений по вашим задачам не было.</div>`
