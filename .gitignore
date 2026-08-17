@@ -31,3 +31,6 @@ deploy/*prod*.yaml
 !deploy/*.example.yaml
 !deploy/*.example.sh
 !deploy/*.example.env
+
+# TypeScript incremental build cache
+*.tsbuildinfo
