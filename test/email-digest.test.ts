@@ -202,6 +202,26 @@ describe('Daily email digest', () => {
     expect(mail.html).toContain('Дольше недели приёмки ждут ещё 1 задача');
   });
 
+  it('names rework in the subject when nothing waits for acceptance', async () => {
+    ctx.db.insert(scoutItems).values({
+      id: randomUUID(),
+      projectId: ctx.projectId,
+      message: 'Вернули на доработку',
+      status: 'changes_requested',
+      reporterId: ctx.memberId,
+      assigneeId: ctx.developerId,
+      createdAt: '2026-06-01 10:00:00',
+      updatedAt: '2026-06-08 10:00:00',
+    }).run();
+    const sendMail = vi.fn(async () => ({ messageId: randomUUID() }));
+
+    await sendDailyDigests({ date: '2026-06-09', recipientEmail: 'developer@test.local', transport: { sendMail } as any });
+
+    const mail = sendMail.mock.calls[0][0] as any;
+    expect(mail.subject).toBe('Scout: 1 задача вернулась к вам на доработку — сводка за 2026-06-09');
+    expect(mail.text).toContain('ВОЗВРАЩЕНЫ ВАМ НА ДОРАБОТКУ (1)');
+  });
+
   it('translates statuses in the daily section', async () => {
     seedChangedItem();
     const sendMail = vi.fn(async () => ({ messageId: randomUUID() }));

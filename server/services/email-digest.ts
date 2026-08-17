@@ -492,9 +492,14 @@ function actionSections(digest: RecipientDigest): Array<{ title: string; hint: s
 
 function buildDigestSubject(digest: RecipientDigest): string {
   const pending = digest.actions.pendingAcceptance.length;
-  return pending > 0
-    ? `Scout: ${pending} ${plural(pending, 'задача ждёт', 'задачи ждут', 'задач ждут')} вашей приёмки — сводка за ${digest.digestDate}`
-    : `Scout: ежедневная сводка за ${digest.digestDate}`;
+  if (pending > 0) {
+    return `Scout: ${pending} ${plural(pending, 'задача ждёт', 'задачи ждут', 'задач ждут')} вашей приёмки — сводка за ${digest.digestDate}`;
+  }
+  const rework = digest.actions.changesRequested.length;
+  if (rework > 0) {
+    return `Scout: ${rework} ${plural(rework, 'задача вернулась', 'задачи вернулись', 'задач вернулись')} к вам на доработку — сводка за ${digest.digestDate}`;
+  }
+  return `Scout: ежедневная сводка за ${digest.digestDate}`;
 }
 
 function plural(count: number, one: string, few: string, many: string): string {
