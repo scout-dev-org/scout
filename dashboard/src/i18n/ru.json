@@ -70,6 +70,7 @@
   "items.filters.searchPlaceholder": "Поиск по описанию...",
   "items.filters.allPriorities": "Все приоритеты",
   "items.filters.allAssignees": "Все исполнители",
+  "items.filters.allAuthors": "Все авторы",
   "items.table.message": "Сообщение",
   "items.table.type": "Тип",
   "items.table.status": "Статус",

@@ -176,6 +176,7 @@ export const listItemsSchema = z.object({
   statuses: z.array(itemStatusSchema).min(1).max(ITEM_STATUSES.length).optional(),
   priority: z.enum(['critical', 'high', 'medium', 'low']).optional(),
   assigneeId: uuidSchema.optional(),
+  reporterId: uuidSchema.optional(),
   search: z.string().max(200).optional(),
 });
 

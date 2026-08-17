@@ -9,6 +9,7 @@ import {
   storeSelectedProjectId,
 } from '../lib/project-selection';
 import { useSSE } from '../hooks/useSSE';
+import { useProjectOpenCounts } from '../hooks/useProjectOpenCounts';
 import { useTranslation } from '../i18n';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
@@ -159,9 +160,12 @@ export default function Items() {
   // Priority filter state
   const [priorityFilter, setPriorityFilter] = useState<string>(() => getInitialPriority(searchParams));
 
-  // Assignee filter state
+  // Assignee and author filter state
   const [teamUsers, setTeamUsers] = useState<UserListItem[]>([]);
   const [assigneeFilter, setAssigneeFilter] = useState<string>(() => searchParams.get('assignee') ?? '');
+  const [authorFilter, setAuthorFilter] = useState<string>(() => searchParams.get('author') ?? '');
+
+  const { openCounts, reload: reloadOpenCounts } = useProjectOpenCounts(projects.map((p) => p.id));
 
   // Load projects
   useEffect(() => {
@@ -188,12 +192,13 @@ export default function Items() {
     if (search) next.set('q', search);
     if (priorityFilter) next.set('priority', priorityFilter);
     if (assigneeFilter) next.set('assignee', assigneeFilter);
+    if (authorFilter) next.set('author', authorFilter);
 
     const nextString = next.toString();
     if (nextString !== currentSearchParams) {
       setSearchParams(next, { replace: true });
     }
-  }, [selectedProject, itemTypeFilter, queueFilter, pagination.page, search, priorityFilter, assigneeFilter, currentSearchParams, setSearchParams]);
+  }, [selectedProject, itemTypeFilter, queueFilter, pagination.page, search, priorityFilter, assigneeFilter, authorFilter, currentSearchParams, setSearchParams]);
 
   // Load users for assignee filter (admin only)
   useEffect(() => {
@@ -224,6 +229,9 @@ export default function Items() {
     if (assigneeFilter) {
       body.assigneeId = assigneeFilter;
     }
+    if (authorFilter) {
+      body.reporterId = authorFilter;
+    }
     if (priorityFilter) {
       body.priority = priorityFilter;
     }
@@ -242,17 +250,18 @@ export default function Items() {
       })
       .catch(() => {})
       .finally(() => { if (showLoading) setLoading(false); });
-  }, [selectedProject, itemTypeFilter, queueFilter, pagination.page, search, assigneeFilter, priorityFilter]);
+  }, [selectedProject, itemTypeFilter, queueFilter, pagination.page, search, assigneeFilter, authorFilter, priorityFilter]);
 
   // Load items + counts when project or filter changes
   useEffect(() => {
     fetchData(true);
   }, [fetchData]);
 
-  // SSE: refresh list on any item change
+  // SSE: refresh list and the per-project open counts on any item change
   const handleSSEEvent = useCallback(() => {
     fetchData(false);
-  }, [fetchData]);
+    reloadOpenCounts();
+  }, [fetchData, reloadOpenCounts]);
 
   useSSE({ projectId: selectedProject, onEvent: handleSSEEvent });
 
@@ -265,6 +274,7 @@ export default function Items() {
     setSearch('');
     setSearchInput('');
     setAssigneeFilter('');
+    setAuthorFilter('');
     setPriorityFilter('');
     setSearchParams(new URLSearchParams({ project: projectId }), { replace: true });
   }
@@ -343,6 +353,11 @@ export default function Items() {
     setPagination((p) => ({ ...p, page: 1 }));
   }
 
+  function handleAuthorFilter(e: React.ChangeEvent<HTMLSelectElement>) {
+    setAuthorFilter(e.target.value);
+    setPagination((p) => ({ ...p, page: 1 }));
+  }
+
   function itemPath(itemId: string) {
     return `/items/${itemId}`;
   }
@@ -378,7 +393,7 @@ export default function Items() {
           >
             {projects.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name}
+                {openCounts[p.id] ? `${p.name} (${openCounts[p.id]})` : p.name}
               </option>
             ))}
           </select>
@@ -431,17 +446,30 @@ export default function Items() {
           <option value="low">{t('items.priorities.low')}</option>
         </select>
         {admin && teamUsers.length > 0 && (
-          <select
-            name="items-assignee"
-            value={assigneeFilter}
-            onChange={handleAssigneeFilter}
-            className={`w-full md:w-48 ${FORM_CONTROL_CLASS}`}
-          >
-            <option value="">{t('items.filters.allAssignees')}</option>
-            {teamUsers.map((u) => (
-              <option key={u.id} value={u.id}>{u.name}</option>
-            ))}
-          </select>
+          <>
+            <select
+              name="items-author"
+              value={authorFilter}
+              onChange={handleAuthorFilter}
+              className={`w-full md:w-48 ${FORM_CONTROL_CLASS}`}
+            >
+              <option value="">{t('items.filters.allAuthors')}</option>
+              {teamUsers.map((u) => (
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </select>
+            <select
+              name="items-assignee"
+              value={assigneeFilter}
+              onChange={handleAssigneeFilter}
+              className={`w-full md:w-48 ${FORM_CONTROL_CLASS}`}
+            >
+              <option value="">{t('items.filters.allAssignees')}</option>
+              {teamUsers.map((u) => (
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </select>
+          </>
         )}
       </div>
 

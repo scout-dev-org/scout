@@ -173,7 +173,7 @@ export const itemRoutes = new Hono()
   .post('/list',
     zValidator('json', listItemsSchema),
     async (c) => {
-      const { projectId, itemType, status, statuses, priority, assigneeId, search, page, perPage } = c.req.valid('json');
+      const { projectId, itemType, status, statuses, priority, assigneeId, reporterId, search, page, perPage } = c.req.valid('json');
       const user = c.get('user');
       const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
       if (!project) throw new NotFoundError('Project', 'PROJECT_NOT_FOUND');
@@ -190,6 +190,7 @@ export const itemRoutes = new Hono()
       else if (statuses) conditions.push(inArray(scoutItems.status, statuses));
       if (priority) conditions.push(eq(scoutItems.priority, priority));
       if (assigneeId) conditions.push(eq(scoutItems.assigneeId, assigneeId));
+      if (reporterId) conditions.push(eq(scoutItems.reporterId, reporterId));
       if (search) conditions.push(like(scoutItems.message, `%${search}%`));
 
       const where = conditions.length === 1 ? conditions[0]! : and(...conditions);

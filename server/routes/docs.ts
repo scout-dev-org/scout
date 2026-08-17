@@ -727,6 +727,7 @@ const spec = {
                   statuses: { type: 'array', items: { $ref: '#/components/schemas/ItemStatus' }, minItems: 1, maxItems: ITEM_STATUSES.length, description: 'Filter by multiple statuses, useful for human queue groups such as Needs Review = review + changes_requested. If status is provided, status takes precedence.' },
                   priority: { $ref: '#/components/schemas/ItemPriority' },
                   assigneeId: { type: 'string', format: 'uuid' },
+                  reporterId: { type: 'string', format: 'uuid', description: 'Фильтр по автору item' },
                   search: { type: 'string', maxLength: 200, description: 'Поиск по тексту сообщения (LIKE)' },
                   page: { type: 'integer', minimum: 1, default: 1 },
                   perPage: { type: 'integer', minimum: 1, maximum: 100, default: 20 },

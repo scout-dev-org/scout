@@ -70,6 +70,7 @@
   "items.filters.searchPlaceholder": "Search by description...",
   "items.filters.allPriorities": "All priorities",
   "items.filters.allAssignees": "All assignees",
+  "items.filters.allAuthors": "All authors",
   "items.table.message": "Message",
   "items.table.type": "Type",
   "items.table.status": "Status",

@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router';
 import { canManageIntegrations, canManageMembers, canSeeProjectAdmin, getUser, logout } from '../lib/auth';
 import { api } from '../lib/api';
 import { useSSE, type SSEEventType } from '../hooks/useSSE';
+import { useProjectOpenCounts } from '../hooks/useProjectOpenCounts';
 import { useTranslation, LOCALE_LABELS, type Locale } from '../i18n';
 
 const SCOUT_REPOSITORY_URL = 'https://github.com/scout-dev-org/scout';
@@ -12,51 +13,34 @@ export default function Layout() {
   const canOpenProjectAdmin = canSeeProjectAdmin();
   const showWebhooks = canManageIntegrations();
   const showUsers = canManageMembers();
-  const [newCount, setNewCount] = useState(0);
+  const [projectIds, setProjectIds] = useState<string[]>([]);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const location = useLocation();
   const { t, locale, setLocale } = useTranslation();
+  const { totalOpen: newCount, reload: reloadCounts } = useProjectOpenCounts(projectIds);
 
   // Close user menu on route change
   useEffect(() => {
     setShowUserMenu(false);
   }, [location.pathname]);
 
-  const loadCounts = useCallback(async () => {
-    try {
-      const projects = await api<{
-        items: { id: number }[];
-      }>('/api/projects/list', { perPage: 100 });
-
-      let total = 0;
-      for (const project of projects.items) {
-        try {
-          const result = await api<{
-            counts: Record<string, number>;
-          }>('/api/items/count', { projectId: project.id });
-          total += result.counts.new ?? 0;
-        } catch {
-          // skip projects we can't access
-        }
-      }
-      setNewCount(total);
-    } catch {
-      // ignore
-    }
+  useEffect(() => {
+    api<{ items: { id: string }[] }>('/api/projects/list', { perPage: 100 })
+      .then((res) => setProjectIds(res.items.map((project) => project.id)))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
-    loadCounts();
-    const interval = setInterval(loadCounts, 30_000);
+    const interval = setInterval(reloadCounts, 30_000);
     return () => clearInterval(interval);
-  }, [loadCounts]);
+  }, [reloadCounts]);
 
   // SSE: refresh badge count on item changes
   const handleSSEEvent = useCallback((event: SSEEventType) => {
     if (event === 'item.created' || event === 'item.status_changed' || event === 'item.deleted') {
-      loadCounts();
+      reloadCounts();
     }
-  }, [loadCounts]);
+  }, [reloadCounts]);
 
   useSSE({ onEvent: handleSSEEvent });
 

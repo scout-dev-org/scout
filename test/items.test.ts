@@ -232,6 +232,21 @@ describe('Items routes', () => {
     expect(body.data.items.map((item: any) => item.id).sort()).toEqual([newItem.id, inProgressItem.id].sort());
   });
 
+  it('POST /list — filter by reporter', async () => {
+    const adminItem = await createTestItem();
+    const memberItem = await createTestItem(ctx.memberToken);
+
+    const res = await post('/list', {
+      projectId: ctx.projectId,
+      reporterId: ctx.memberId,
+    }, ctx.adminToken);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.data.items.map((item: any) => item.id)).toEqual([memberItem.id]);
+    expect(body.data.items.map((item: any) => item.id)).not.toContain(adminItem.id);
+  });
+
   it('POST /list — uses projectId and perPage', async () => {
     await createTestItem();
     await createTestItem();

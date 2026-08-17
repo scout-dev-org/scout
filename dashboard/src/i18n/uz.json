@@ -70,6 +70,7 @@
   "items.filters.searchPlaceholder": "Tavsif bo'yicha qidirish...",
   "items.filters.allPriorities": "Barcha ustuvorliklar",
   "items.filters.allAssignees": "Barcha ijrochilar",
+  "items.filters.allAuthors": "Barcha mualliflar",
   "items.table.message": "Xabar",
   "items.table.type": "Tur",
   "items.table.status": "Holat",
