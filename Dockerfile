@@ -52,13 +52,13 @@ RUN mkdir -p data storage/screenshots storage/recordings
 
 VOLUME /app/data
 VOLUME /app/storage
-EXPOSE 10009
+EXPOSE 10020
 
 ENV NODE_ENV=production
-ENV SCOUT_PORT=10009
+ENV SCOUT_PORT=10020
 ENV SCOUT_DB_PATH=data/scout.db
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD wget -q --spider http://localhost:10009/health || exit 1
+  CMD wget -q --spider http://localhost:10020/health || exit 1
 
 CMD ["node", "dist/server/index.js"]

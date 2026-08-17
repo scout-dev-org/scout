@@ -6,7 +6,7 @@ services:
     env_file:
       - .env
     ports:
-      - "127.0.0.1:10009:10009"
+      - "127.0.0.1:10020:10020"
     volumes:
       - ./data:/app/data
       - ./storage:/app/storage

@@ -16,7 +16,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * 4. API: verify data integrity at each step
  */
 
-const API = 'http://localhost:10009';
+const API = 'http://localhost:10020';
 const DEMO = `${API}/demo/`;
 const DASHBOARD = `${API}`;
 const E2E_COMMIT_SHA = execFileSync('git', ['rev-parse', 'HEAD'], {
@@ -117,7 +117,7 @@ test.describe('Full bug lifecycle', () => {
     const { status, data } = await apiPost('/items/create', {
       projectId,
       message: bugMessage,
-      pageUrl: 'http://localhost:10009/demo/',
+      pageUrl: 'http://localhost:10020/demo/',
       cssSelector: 'footer',
       elementText: 'AutoParts © 2026',
       viewportWidth: 1280,
@@ -421,7 +421,7 @@ test.describe('Full bug lifecycle', () => {
   });
 
   test('11. SSO: popup serves login page with session check', async () => {
-    const res = await fetch(`${API}/auth/sso/popup?origin=http://localhost:10009`);
+    const res = await fetch(`${API}/auth/sso/popup?origin=http://localhost:10020`);
     expect(res.status).toBe(200);
     const html = await res.text();
     // Must contain login form elements

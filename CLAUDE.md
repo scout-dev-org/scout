@@ -1,6 +1,6 @@
 # Scout
 
-Self-hosted bug tracker: Hono API, SQLite, React dashboard and embeddable widget, all served by one process on port 10009.
+Self-hosted bug tracker: Hono API, SQLite, React dashboard and embeddable widget, all served by one process. The project owns ports 10020-10029: 10020 serves API, SPA and widget; 10021 is the dashboard dev server.
 
 ## Layout
 

@@ -56,7 +56,7 @@ Tester saves note     →  Widget stores page-level observation without workflow
 ```bash
 docker run -d \
   --name scout \
-  -p 10009:10009 \
+  -p 10020:10020 \
   -e SCOUT_JWT_SECRET=$(openssl rand -hex 32) \
   -e SCOUT_ADMIN_EMAIL=admin@example.com \
   -e SCOUT_ADMIN_PASSWORD='<CHANGE-ME-admin-password>' \
@@ -65,7 +65,7 @@ docker run -d \
   ghcr.io/<your-org>/scout:master
 ```
 
-Open http://localhost:10009 and sign in with the admin credentials from `SCOUT_ADMIN_EMAIL` / `SCOUT_ADMIN_PASSWORD`.
+Open http://localhost:10020 and sign in with the admin credentials from `SCOUT_ADMIN_EMAIL` / `SCOUT_ADMIN_PASSWORD`.
 
 Local development auto-seeds `admin@scout.local` / `admin` and a demo project when the database is empty. **Never use default credentials outside local development.**
 
@@ -190,7 +190,7 @@ volumes:
 ```
 # Caddyfile
 scout.example.com {
-    reverse_proxy scout:10009
+    reverse_proxy scout:10020
 }
 ```
 
@@ -201,7 +201,7 @@ scout.example.com {
 | `SCOUT_JWT_SECRET` | dev secret | **Required in production** |
 | `SCOUT_ADMIN_EMAIL` | — | Initial admin email when a production database has no users |
 | `SCOUT_ADMIN_PASSWORD` | generated if omitted | Initial admin password when `SCOUT_ADMIN_EMAIL` is set |
-| `SCOUT_PORT` | `10009` | Server port |
+| `SCOUT_PORT` | `10020` | Server port |
 | `SCOUT_DB_PATH` | `data/scout.db` | SQLite database path |
 | `SCOUT_CORS_ORIGINS` | — | Comma-separated allowed origins |
 | `SCOUT_DASHBOARD_WIDGET_PROJECT_SLUG` | — | Optional project slug for dashboard-embedded widget config |
@@ -238,7 +238,7 @@ docker cp scout:/app/data/scout.db ./backup/scout-$(date +%Y%m%d).db
 ## Development
 
 ```bash
-pnpm dev          # API server (port 10009)
+pnpm dev          # API server (port 10020)
 pnpm dev:all      # API + dashboard + widget (hot reload)
 pnpm test         # unit tests (Vitest)
 pnpm test:e2e     # E2E tests (Playwright — chromium/firefox/webkit)

@@ -374,7 +374,7 @@ app.onError((err, c) => {
 });
 
 // Start server
-const port = Number(process.env.SCOUT_PORT) || 10009;
+const port = Number(process.env.SCOUT_PORT) || 10020;
 
 serve({ fetch: app.fetch, port }, (info) => {
   logger.info({ port: info.port }, 'Scout started');

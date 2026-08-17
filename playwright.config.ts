@@ -6,7 +6,7 @@ export default defineConfig({
   retries: 0,
   workers: 1, // Serial — avoids rate limit collisions between browser projects
   use: {
-    baseURL: 'http://localhost:10009',
+    baseURL: 'http://localhost:10020',
     headless: true,
     screenshot: 'only-on-failure',
   },
@@ -18,7 +18,7 @@ export default defineConfig({
   // E2E covers API, dashboard, demo, and widget assets.
   webServer: {
     command: 'pnpm dev:all',
-    port: 10009,
+    port: 10020,
     timeout: 30_000,
     reuseExistingServer: true,
   },

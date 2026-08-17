@@ -1,6 +1,6 @@
 import { expect, type Page, test } from '@playwright/test';
 
-const API = 'http://localhost:10009';
+const API = 'http://localhost:10020';
 const DEMO = `${API}/demo/`;
 const VALID_TEST_TOKEN = 'eyJhbGciOiJub25lIn0.eyJleHAiOjQxMDI0NDQ4MDB9.signature';
 
