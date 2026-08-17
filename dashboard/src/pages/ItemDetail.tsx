@@ -996,7 +996,7 @@ export default function ItemDetail() {
   const isTerminal = item.status === 'verified' || item.status === 'cancelled';
 
   return (
-    <div className="p-4 md:p-6 max-w-5xl">
+    <div className="p-4 md:p-6">
       {/* Header */}
       <div className="mb-4 md:mb-6">
         {/* Back button — sticky on mobile */}
@@ -1008,17 +1008,12 @@ export default function ItemDetail() {
             &larr; {t('items.detail.back')}
           </button>
         </div>
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-4">
+        <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-start md:justify-between md:gap-4">
           <div className="min-w-0">
-            {/* Page title: item message (truncated) */}
+            {/* Page title: first line of the item message */}
             <h1 className="text-lg font-bold leading-snug text-gray-900 break-words mb-2">
               {itemText.title}
             </h1>
-            {itemText.details && (
-              <div className="mb-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 whitespace-pre-wrap">
-                {itemText.details}
-              </div>
-            )}
             <div className="flex flex-wrap items-center gap-2 md:gap-3 text-sm text-gray-500">
               <ItemTypeBadge itemType={item.itemType} />
               <StatusBadge status={item.status} />
@@ -1112,8 +1107,8 @@ export default function ItemDetail() {
             )}
           </div>
 
-          {/* Action buttons — full-width stacked on mobile, inline on desktop */}
-          <div className="flex flex-col gap-2 md:flex-row md:flex-shrink-0 md:flex-wrap">
+          {/* Action buttons — below the description on mobile, inline with the title on desktop */}
+          <div className="order-last flex flex-col gap-2 md:order-none md:flex-row md:flex-shrink-0 md:flex-wrap">
             {item.itemType === 'note' && item.permissions.canUpdate && !isTerminal && (
               <button
                 onClick={handleMakeTask}
@@ -1251,6 +1246,13 @@ export default function ItemDetail() {
               </button>
             )}
           </div>
+
+          {/* Full description — always expanded, across the whole content width */}
+          {itemText.details && (
+            <div className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-[15px] leading-relaxed text-gray-800 whitespace-pre-wrap break-words md:basis-full">
+              {itemText.details}
+            </div>
+          )}
         </div>
       </div>
 
