@@ -74,10 +74,10 @@ describe('Daily email digest', () => {
 
     expect(result.periodStart).toBe('2026-06-08 19:00:00');
     expect(result.periodEnd).toBe('2026-06-09 19:00:00');
-    expect(result.recipientCount).toBe(2);
+    expect(result.recipientCount).toBe(3);
     expect(result.sentCount).toBe(0);
-    expect(result.summaries.map((summary) => summary.email).sort()).toEqual(['developer@test.local', 'member@test.local']);
-    for (const summary of result.summaries) {
+    expect(result.summaries.map((summary) => summary.email).sort()).toEqual(['admin@test.local', 'developer@test.local', 'member@test.local']);
+    for (const summary of result.summaries.filter((summary) => summary.email !== 'admin@test.local')) {
       expect(summary.itemCount).toBe(1);
       expect(summary.createdItemCount).toBe(1);
       expect(summary.statusChangeCount).toBe(2);
@@ -91,8 +91,8 @@ describe('Daily email digest', () => {
 
     const result = await sendDailyDigests({ date: '2026-06-09', dryRun: true });
 
-    expect(result.recipientCount).toBe(1);
-    expect(result.summaries.map((summary) => summary.email)).toEqual(['member@test.local']);
+    expect(result.recipientCount).toBe(2);
+    expect(result.summaries.map((summary) => summary.email).sort()).toEqual(['admin@test.local', 'member@test.local']);
   });
 
   it('sends once per user per digest date unless forced', async () => {
@@ -102,12 +102,12 @@ describe('Daily email digest', () => {
     const first = await sendDailyDigests({ date: '2026-06-09', transport: { sendMail } as any });
     const second = await sendDailyDigests({ date: '2026-06-09', transport: { sendMail } as any });
 
-    expect(first.sentCount).toBe(2);
+    expect(first.sentCount).toBe(3);
     expect(second.sentCount).toBe(0);
-    expect(second.skippedCount).toBe(2);
-    expect(sendMail).toHaveBeenCalledTimes(2);
+    expect(second.skippedCount).toBe(3);
+    expect(sendMail).toHaveBeenCalledTimes(3);
     const deliveries = ctx.db.select().from(emailDigestDeliveries).all();
-    expect(deliveries).toHaveLength(2);
+    expect(deliveries).toHaveLength(3);
     expect(deliveries.every((delivery) => delivery.digestDate === '2026-06-09')).toBe(true);
   });
 
@@ -129,6 +129,50 @@ describe('Daily email digest', () => {
     expect(ctx.db.select().from(emailDigestDeliveries).all()).toHaveLength(1);
   });
 
+  it('lists items waiting for the recipient to accept them, even without events that day', async () => {
+    process.env.SCOUT_PUBLIC_URL = 'https://scout.test.local';
+    const itemId = randomUUID();
+    ctx.db.insert(scoutItems).values({
+      id: itemId,
+      projectId: ctx.projectId,
+      itemType: 'bug',
+      message: 'Кнопка сохранения не работает\nвторая строка описания',
+      status: 'done',
+      priority: 'critical',
+      reporterId: ctx.memberId,
+      assigneeId: ctx.developerId,
+      resolvedById: ctx.developerId,
+      createdAt: '2026-05-01 10:00:00',
+      updatedAt: '2026-05-02 10:00:00',
+    }).run();
+    const sendMail = vi.fn(async () => ({ messageId: randomUUID() }));
+
+    const result = await sendDailyDigests({ date: '2026-06-09', transport: { sendMail } as any });
+
+    expect(result.summaries.map((summary) => summary.email)).toEqual(['admin@test.local']);
+    const mail = sendMail.mock.calls[0][0] as any;
+    expect(mail.subject).toBe('Scout: 1 задача ждёт вашей приёмки — сводка за 2026-06-09');
+    expect(mail.text).toContain('ЖДУТ ВАШЕЙ ПРИЁМКИ (1)');
+    expect(mail.text).toContain('Кнопка сохранения не работает');
+    expect(mail.text).not.toContain('вторая строка описания');
+    expect(mail.text).toContain(`https://scout.test.local/items/${itemId}`);
+    expect(mail.html).toContain(`href="https://scout.test.local/items/${itemId}"`);
+    expect(mail.html).toContain('Баг · Критический · Test Project');
+    delete process.env.SCOUT_PUBLIC_URL;
+  });
+
+  it('translates statuses in the daily section', async () => {
+    seedChangedItem();
+    const sendMail = vi.fn(async () => ({ messageId: randomUUID() }));
+
+    await sendDailyDigests({ date: '2026-06-09', recipientEmail: 'member@test.local', transport: { sendMail } as any });
+
+    const mail = sendMail.mock.calls[0][0] as any;
+    expect(mail.text).toContain('Новая → В работе');
+    expect(mail.text).toContain('В работе → Ждёт приёмки');
+    expect(mail.text).not.toContain('in_progress');
+  });
+
   it('exposes admin-only dry-run endpoint', async () => {
     seedChangedItem();
     const app = new Hono();
@@ -148,7 +192,7 @@ describe('Daily email digest', () => {
     });
     expect(adminRes.status).toBe(200);
     const body = await adminRes.json() as any;
-    expect(body.data.recipientCount).toBe(2);
+    expect(body.data.recipientCount).toBe(3);
     expect(ctx.db.select().from(emailDigestDeliveries).where(eq(emailDigestDeliveries.digestDate, '2026-06-09')).all()).toHaveLength(0);
   });
 });

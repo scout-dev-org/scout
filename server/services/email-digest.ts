@@ -3,6 +3,7 @@ import { and, eq, gte, inArray, lt } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
 import { emailDigestDeliveries, projects, scoutItemNotes, scoutItems, users, type ItemStatus, type ScoutItem, type ScoutItemNote, type User } from '../db/schema.js';
+import { hasProjectPermission } from '../middleware/permissions.js';
 import { logger } from '../lib/logger.js';
 
 type DigestEventType = 'created' | 'status_change' | 'assignment' | 'type_change';
@@ -14,6 +15,22 @@ type DigestEvent = {
   actorId?: string | null;
   from?: string;
   to?: string;
+};
+
+/** An item the recipient still has to act on, independent of today's events. */
+type ActionItem = {
+  id: string;
+  itemType: string;
+  message: string;
+  status: string;
+  priority: string | null;
+  projectName: string;
+  updatedAt: string;
+};
+
+type RecipientActions = {
+  pendingAcceptance: ActionItem[];
+  changesRequested: ActionItem[];
 };
 
 type RecipientDigest = {
@@ -29,6 +46,7 @@ type RecipientDigest = {
   statusTransitions: Record<string, number>;
   currentStatusCounts: Record<string, number>;
   projectCounts: Record<string, number>;
+  actions: RecipientActions;
 };
 
 type SendMailTransport = Pick<Transporter, 'sendMail'>;
@@ -66,14 +84,34 @@ const DEFAULT_DIGEST_TIME = '18:00';
 const DEFAULT_TIME_ZONE = 'Asia/Almaty';
 
 const statusLabels: Record<ItemStatus, string> = {
-  new: 'new',
-  in_progress: 'in_progress',
-  review: 'review',
-  done: 'done',
-  changes_requested: 'changes_requested',
-  verified: 'verified',
-  cancelled: 'cancelled',
+  new: 'Новая',
+  in_progress: 'В работе',
+  review: 'На проверке',
+  done: 'Ждёт приёмки',
+  changes_requested: 'Нужны правки',
+  verified: 'Принята',
+  cancelled: 'Отменена',
 };
+
+const itemTypeLabels: Record<string, string> = {
+  bug: 'Баг',
+  note: 'Заметка',
+  task: 'Задача',
+};
+
+const priorityLabels: Record<string, string> = {
+  critical: 'Критический',
+  high: 'Высокий',
+  medium: 'Средний',
+  low: 'Низкий',
+};
+
+/** How many items each action section lists before collapsing into a counter. */
+const ACTION_LIST_LIMIT = 10;
+
+function statusLabel(status: string): string {
+  return statusLabels[status as ItemStatus] ?? status;
+}
 
 function requireSmtpConfig() {
   const host = process.env.SMTP_HOST?.trim();
@@ -246,6 +284,70 @@ function getRecipients(events: DigestEvent[]): User[] {
     .filter((user) => isDeliverableDigestEmail(user.email));
 }
 
+function toActionItem(item: ScoutItem, projectNames: Map<string, string>): ActionItem {
+  return {
+    id: item.id,
+    itemType: item.itemType,
+    message: item.message,
+    status: item.status,
+    priority: item.priority,
+    projectName: projectNames.get(item.projectId) ?? item.projectId,
+    updatedAt: item.updatedAt,
+  };
+}
+
+function sortActionItems(items: ActionItem[]): ActionItem[] {
+  return items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+/**
+ * Items waiting on a person: `done` needs someone who can accept it,
+ * `changes_requested` needs the assignee who has to redo the work.
+ */
+function getOpenActionsByUser(projectNames: Map<string, string>): Map<string, RecipientActions> {
+  const waiting = db.select().from(scoutItems)
+    .where(inArray(scoutItems.status, ['done', 'changes_requested']))
+    .all();
+  if (waiting.length === 0) return new Map();
+
+  const actionsByUser = new Map<string, RecipientActions>();
+  const actionsFor = (userId: string): RecipientActions => {
+    const existing = actionsByUser.get(userId);
+    if (existing) return existing;
+    const created: RecipientActions = { pendingAcceptance: [], changesRequested: [] };
+    actionsByUser.set(userId, created);
+    return created;
+  };
+
+  const candidates = db.select().from(users).where(eq(users.isActive, true)).all()
+    .filter((user) => isDeliverableDigestEmail(user.email));
+  const acceptCache = new Map<string, boolean>();
+  const canAccept = (user: User, projectId: string): boolean => {
+    const key = `${user.id}:${projectId}`;
+    const cached = acceptCache.get(key);
+    if (cached !== undefined) return cached;
+    const allowed = hasProjectPermission(user.id, user.role, projectId, 'accept_item');
+    acceptCache.set(key, allowed);
+    return allowed;
+  };
+
+  for (const item of waiting) {
+    if (item.status === 'changes_requested') {
+      if (item.assigneeId) actionsFor(item.assigneeId).changesRequested.push(toActionItem(item, projectNames));
+      continue;
+    }
+    for (const user of candidates) {
+      if (canAccept(user, item.projectId)) actionsFor(user.id).pendingAcceptance.push(toActionItem(item, projectNames));
+    }
+  }
+
+  for (const actions of actionsByUser.values()) {
+    sortActionItems(actions.pendingAcceptance);
+    sortActionItems(actions.changesRequested);
+  }
+  return actionsByUser;
+}
+
 function isUserRelatedToEvent(userId: string, event: DigestEvent): boolean {
   return event.actorId === userId ||
     event.item.reporterId === userId ||
@@ -257,7 +359,7 @@ function increment(record: Record<string, number>, key: string, amount = 1): voi
   record[key] = (record[key] ?? 0) + amount;
 }
 
-function buildRecipientDigest(user: User, events: DigestEvent[], digestDate: string, periodStart: string, periodEnd: string, projectNames: Map<string, string>): RecipientDigest {
+function buildRecipientDigest(user: User, events: DigestEvent[], digestDate: string, periodStart: string, periodEnd: string, projectNames: Map<string, string>, actions: RecipientActions): RecipientDigest {
   const relevant = events.filter((event) => isUserRelatedToEvent(user.id, event));
   const uniqueItems = unique(relevant.map((event) => event.item.id));
   const digest: RecipientDigest = {
@@ -273,6 +375,7 @@ function buildRecipientDigest(user: User, events: DigestEvent[], digestDate: str
     statusTransitions: {},
     currentStatusCounts: {},
     projectCounts: {},
+    actions,
   };
 
   const itemsById = new Map(relevant.map((event) => [event.item.id, event.item]));
@@ -283,21 +386,47 @@ function buildRecipientDigest(user: User, events: DigestEvent[], digestDate: str
 
   for (const event of relevant) {
     if (event.type === 'status_change') {
-      increment(digest.statusTransitions, `${event.from ?? '?'} -> ${event.to ?? '?'}`);
+      increment(digest.statusTransitions, `${statusLabel(event.from ?? '?')} → ${statusLabel(event.to ?? '?')}`);
     }
   }
 
   return digest;
 }
 
+const NO_ACTIONS: RecipientActions = { pendingAcceptance: [], changesRequested: [] };
+
+function hasContent(digest: RecipientDigest): boolean {
+  return digest.itemCount > 0
+    || digest.actions.pendingAcceptance.length > 0
+    || digest.actions.changesRequested.length > 0;
+}
+
 function buildDigests(digestDate: string, periodStart: string, periodEnd: string): RecipientDigest[] {
   const events = getEvents(periodStart, periodEnd);
-  if (events.length === 0) return [];
+  const openItems = db.select({ projectId: scoutItems.projectId }).from(scoutItems)
+    .where(inArray(scoutItems.status, ['done', 'changes_requested']))
+    .all();
+  if (events.length === 0 && openItems.length === 0) return [];
 
-  const projectNames = getProjectNames(events.map((event) => event.item.projectId));
-  return getRecipients(events)
-    .map((user) => buildRecipientDigest(user, events, digestDate, periodStart, periodEnd, projectNames))
-    .filter((digest) => digest.itemCount > 0);
+  const projectNames = getProjectNames([
+    ...events.map((event) => event.item.projectId),
+    ...openItems.map((item) => item.projectId),
+  ]);
+  const actionsByUser = getOpenActionsByUser(projectNames);
+
+  const eventRecipients = getRecipients(events);
+  const known = new Set(eventRecipients.map((user) => user.id));
+  const actionOnlyIds = [...actionsByUser.keys()].filter((userId) => !known.has(userId));
+  const actionOnlyRecipients = actionOnlyIds.length === 0
+    ? []
+    : db.select().from(users)
+      .where(and(inArray(users.id, actionOnlyIds), eq(users.isActive, true)))
+      .all()
+      .filter((user) => isDeliverableDigestEmail(user.email));
+
+  return [...eventRecipients, ...actionOnlyRecipients]
+    .map((user) => buildRecipientDigest(user, events, digestDate, periodStart, periodEnd, projectNames, actionsByUser.get(user.id) ?? NO_ACTIONS))
+    .filter(hasContent);
 }
 
 function formatCounts(record: Record<string, number>, emptyText: string): string[] {
@@ -309,39 +438,199 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[char]!));
 }
 
-function buildDigestText(digest: RecipientDigest): string {
-  const baseUrl = process.env.SCOUT_PUBLIC_URL?.trim() || process.env.SCOUT_URL?.trim() || '';
+function getBaseUrl(): string {
+  return (process.env.SCOUT_PUBLIC_URL?.trim() || process.env.SCOUT_URL?.trim() || '').replace(/\/+$/, '');
+}
+
+function itemUrl(itemId: string): string {
+  const baseUrl = getBaseUrl();
+  return baseUrl ? `${baseUrl}/items/${itemId}` : '';
+}
+
+function itemTitle(message: string): string {
+  const firstLine = message.split(/\r?\n/)[0]?.trim() || message.trim();
+  return firstLine.length > 120 ? `${firstLine.slice(0, 117)}...` : firstLine;
+}
+
+function itemMeta(item: ActionItem): string {
   return [
+    itemTypeLabels[item.itemType] ?? item.itemType,
+    item.priority ? priorityLabels[item.priority] ?? item.priority : null,
+    item.projectName,
+  ].filter(Boolean).join(' · ');
+}
+
+function actionSections(digest: RecipientDigest): Array<{ title: string; hint: string; items: ActionItem[] }> {
+  return [
+    {
+      title: 'Ждут вашей приёмки',
+      hint: 'Работа завершена — нужно проверить результат и принять задачу или вернуть на доработку.',
+      items: digest.actions.pendingAcceptance,
+    },
+    {
+      title: 'Возвращены вам на доработку',
+      hint: 'По этим задачам запросили правки.',
+      items: digest.actions.changesRequested,
+    },
+  ].filter((section) => section.items.length > 0);
+}
+
+function buildDigestSubject(digest: RecipientDigest): string {
+  const pending = digest.actions.pendingAcceptance.length;
+  return pending > 0
+    ? `Scout: ${pending} ${plural(pending, 'задача ждёт', 'задачи ждут', 'задач ждут')} вашей приёмки — сводка за ${digest.digestDate}`
+    : `Scout: ежедневная сводка за ${digest.digestDate}`;
+}
+
+function plural(count: number, one: string, few: string, many: string): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
+function buildDigestText(digest: RecipientDigest): string {
+  const baseUrl = getBaseUrl();
+  const lines = [
     `Здравствуйте, ${digest.user.name}.`,
     '',
-    `Краткая сводка Scout за ${digest.digestDate} (${process.env.SCOUT_DAILY_DIGEST_TIMEZONE || DEFAULT_TIME_ZONE}).`,
-    '',
-    'Итоги:',
-    `- затронуто задач: ${digest.itemCount}`,
-    `- создано задач: ${digest.createdItemCount}`,
-    `- переходов статусов: ${digest.statusChangeCount}`,
-    `- назначений: ${digest.assignmentCount}`,
-    `- изменений типа: ${digest.typeChangeCount}`,
-    '',
-    'Переходы статусов:',
-    ...formatCounts(digest.statusTransitions, 'не было'),
-    '',
-    'Текущие статусы затронутых задач:',
-    ...formatCounts(digest.currentStatusCounts, 'нет затронутых задач'),
-    '',
-    'Проекты:',
-    ...formatCounts(digest.projectCounts, 'нет проектов'),
-    ...(baseUrl ? ['', `Открыть Scout: ${baseUrl}`] : []),
-  ].join('\n');
+    `Сводка Scout за ${digest.digestDate} (${process.env.SCOUT_DAILY_DIGEST_TIMEZONE || DEFAULT_TIME_ZONE}).`,
+  ];
+
+  for (const section of actionSections(digest)) {
+    lines.push('', `${section.title.toUpperCase()} (${section.items.length})`, section.hint, '');
+    for (const item of section.items.slice(0, ACTION_LIST_LIMIT)) {
+      lines.push(`- ${itemTitle(item.message)}`);
+      lines.push(`  ${itemMeta(item)}`);
+      const url = itemUrl(item.id);
+      if (url) lines.push(`  ${url}`);
+    }
+    if (section.items.length > ACTION_LIST_LIMIT) {
+      lines.push(`- и ещё ${section.items.length - ACTION_LIST_LIMIT}`);
+    }
+  }
+
+  if (digest.itemCount === 0) {
+    lines.push('', 'За день изменений по вашим задачам не было.');
+  } else {
+    lines.push(
+      '',
+      'Что произошло за день:',
+      `- затронуто задач: ${digest.itemCount}`,
+      `- создано задач: ${digest.createdItemCount}`,
+      `- переходов статусов: ${digest.statusChangeCount}`,
+      `- назначений: ${digest.assignmentCount}`,
+      `- изменений типа: ${digest.typeChangeCount}`,
+    );
+    if (Object.keys(digest.statusTransitions).length > 0) {
+      lines.push('', 'Переходы статусов:', ...formatCounts(digest.statusTransitions, ''));
+    }
+    if (Object.keys(digest.currentStatusCounts).length > 0) {
+      lines.push('', 'Текущие статусы затронутых задач:', ...formatCounts(digest.currentStatusCounts, ''));
+    }
+    if (Object.keys(digest.projectCounts).length > 0) {
+      lines.push('', 'Проекты:', ...formatCounts(digest.projectCounts, ''));
+    }
+  }
+
+  if (baseUrl) lines.push('', `Открыть Scout: ${baseUrl}`);
+  return lines.join('\n');
+}
+
+function countRow(label: string, value: number): string {
+  return `<tr><td style="padding:4px 0;color:#4b5563;font-size:14px;">${escapeHtml(label)}</td>`
+    + `<td align="right" style="padding:4px 0;color:#111827;font-size:14px;font-weight:600;">${value}</td></tr>`;
+}
+
+function listRows(record: Record<string, number>, emptyText: string): string {
+  const entries = Object.entries(record).sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length === 0) {
+    return `<tr><td colspan="2" style="padding:4px 0;color:#9ca3af;font-size:14px;">${escapeHtml(emptyText)}</td></tr>`;
+  }
+  return entries.map(([key, value]) => countRow(key, value)).join('');
+}
+
+function actionItemHtml(item: ActionItem): string {
+  const url = itemUrl(item.id);
+  const title = escapeHtml(itemTitle(item.message));
+  const heading = url
+    ? `<a href="${escapeHtml(url)}" style="color:#1d4ed8;text-decoration:none;font-weight:600;font-size:15px;">${title}</a>`
+    : `<span style="color:#111827;font-weight:600;font-size:15px;">${title}</span>`;
+  return `<tr><td style="padding:10px 0;border-bottom:1px solid #f3f4f6;">`
+    + `${heading}`
+    + `<div style="margin-top:4px;color:#6b7280;font-size:13px;">${escapeHtml(itemMeta(item))}</div>`
+    + `</td></tr>`;
+}
+
+function sectionHtml(title: string, hint: string, items: ActionItem[]): string {
+  const rows = items.slice(0, ACTION_LIST_LIMIT).map(actionItemHtml).join('');
+  const rest = items.length > ACTION_LIST_LIMIT
+    ? `<div style="margin-top:10px;color:#6b7280;font-size:13px;">и ещё ${items.length - ACTION_LIST_LIMIT}</div>`
+    : '';
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;">`
+    + `<tr><td style="padding:16px 20px;">`
+    + `<div style="color:#92400e;font-size:16px;font-weight:700;">${escapeHtml(title)} (${items.length})</div>`
+    + `<div style="margin-top:4px;color:#92400e;font-size:13px;">${escapeHtml(hint)}</div>`
+    + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;">${rows}</table>`
+    + rest
+    + `</td></tr></table>`;
+}
+
+function namedSection(title: string, record: Record<string, number>): string {
+  if (Object.keys(record).length === 0) return '';
+  return `<div style="margin-top:20px;color:#111827;font-size:15px;font-weight:700;">${escapeHtml(title)}</div>`
+    + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:6px;">${listRows(record, '')}</table>`;
 }
 
 function buildDigestHtml(digest: RecipientDigest): string {
-  const htmlLines = buildDigestText(digest).split('\n').map((line) => {
-    if (line === '') return '<br>';
-    if (line.startsWith('- ')) return `<li>${escapeHtml(line.slice(2))}</li>`;
-    return `<p>${escapeHtml(line)}</p>`;
-  });
-  return `<!doctype html><html><body>${htmlLines.join('\n')}</body></html>`;
+  const baseUrl = getBaseUrl();
+  const timeZone = process.env.SCOUT_DAILY_DIGEST_TIMEZONE || DEFAULT_TIME_ZONE;
+  const actions = actionSections(digest)
+    .map((section) => sectionHtml(section.title, section.hint, section.items))
+    .join('');
+
+  const daily = digest.itemCount === 0
+    ? `<div style="padding-top:12px;color:#6b7280;font-size:14px;">За день изменений по вашим задачам не было.</div>`
+    : `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tr><td style="padding-top:12px;color:#111827;font-size:15px;font-weight:700;">Что произошло за день</td></tr>
+</table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;">
+${countRow('Затронуто задач', digest.itemCount)}
+${countRow('Создано задач', digest.createdItemCount)}
+${countRow('Переходов статусов', digest.statusChangeCount)}
+${countRow('Назначений', digest.assignmentCount)}
+${countRow('Изменений типа', digest.typeChangeCount)}
+</table>
+${namedSection('Переходы статусов', digest.statusTransitions)}
+${namedSection('Текущие статусы затронутых задач', digest.currentStatusCounts)}
+${namedSection('Проекты', digest.projectCounts)}`;
+
+  const button = baseUrl
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 0;"><tr><td style="background:#111827;border-radius:6px;">`
+      + `<a href="${escapeHtml(baseUrl)}/items" style="display:inline-block;padding:10px 18px;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;">Открыть Scout</a>`
+      + `</td></tr></table>`
+    : '';
+
+  return `<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Scout</title></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+<tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:#ffffff;border-radius:10px;border:1px solid #e5e7eb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+<tr><td style="padding:24px 24px 8px;">
+<div style="color:#111827;font-size:20px;font-weight:700;">Сводка Scout за ${escapeHtml(digest.digestDate)}</div>
+<div style="margin-top:4px;color:#6b7280;font-size:13px;">${escapeHtml(digest.user.name)} · ${escapeHtml(timeZone)}</div>
+</td></tr>
+<tr><td style="padding:16px 24px 0;">
+${actions}
+${daily}
+</td></tr>
+<tr><td style="padding:20px 24px 24px;">${button}</td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>`;
 }
 
 function wasAlreadySent(userId: string, digestDate: string): boolean {
@@ -412,7 +701,7 @@ export async function sendDailyDigests(options: SendDailyDigestsOptions = {}): P
     const info = await transport!.sendMail({
       from: smtpFrom,
       to: digest.user.email,
-      subject: `Scout: ежедневная сводка за ${digest.digestDate}`,
+      subject: buildDigestSubject(digest),
       text: buildDigestText(digest),
       html: buildDigestHtml(digest),
     });
