@@ -150,6 +150,7 @@ describe('Daily email digest', () => {
     const result = await sendDailyDigests({ date: '2026-06-09', transport: { sendMail } as any });
 
     expect(result.summaries.map((summary) => summary.email)).toEqual(['admin@test.local']);
+    expect(result.summaries[0]).toMatchObject({ itemCount: 0, pendingAcceptanceCount: 1, changesRequestedCount: 0 });
     const mail = sendMail.mock.calls[0][0] as any;
     expect(mail.subject).toBe('Scout: 1 задача ждёт вашей приёмки — сводка за 2026-06-09');
     expect(mail.text).toContain('ЖДУТ ВАШЕЙ ПРИЁМКИ (1)');

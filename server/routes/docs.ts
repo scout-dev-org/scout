@@ -1241,7 +1241,7 @@ const spec = {
       post: {
         tags: ['Notifications'],
         summary: 'Run daily email digest',
-        description: 'Admin-only operational endpoint. Builds the concise per-user daily Scout email digest for a date (`YYYY-MM-DD`) and either sends it through SMTP or returns a dry-run summary. Normal delivery is handled by the daily worker using `SCOUT_DAILY_DIGEST_TIME` and `SCOUT_DAILY_DIGEST_TIMEZONE`.',
+        description: 'Admin-only operational endpoint. Builds the per-user daily Scout email digest for a date (`YYYY-MM-DD`) and either sends it through SMTP or returns a dry-run summary. The digest leads with items waiting on the recipient (`done` items they may accept, `changes_requested` items assigned to them), so recipients with such items are included even on days without events. Normal delivery is handled by the daily worker using `SCOUT_DAILY_DIGEST_TIME` and `SCOUT_DAILY_DIGEST_TIMEZONE`.',
         security: [{ BearerAuth: [] }],
         requestBody: {
           required: true,
@@ -1262,7 +1262,45 @@ const spec = {
         responses: {
           200: {
             description: 'Digest run summary',
-            content: { 'application/json': { schema: { type: 'object' } } },
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    data: {
+                      type: 'object',
+                      properties: {
+                        digestDate: { type: 'string' },
+                        periodStart: { type: 'string' },
+                        periodEnd: { type: 'string' },
+                        dryRun: { type: 'boolean' },
+                        recipientCount: { type: 'integer' },
+                        sentCount: { type: 'integer' },
+                        skippedCount: { type: 'integer' },
+                        summaries: {
+                          type: 'array',
+                          items: {
+                            type: 'object',
+                            properties: {
+                              userId: { type: 'string', format: 'uuid' },
+                              email: { type: 'string' },
+                              itemCount: { type: 'integer', description: 'Items touched by events during the digest day' },
+                              createdItemCount: { type: 'integer' },
+                              statusChangeCount: { type: 'integer' },
+                              assignmentCount: { type: 'integer' },
+                              typeChangeCount: { type: 'integer' },
+                              pendingAcceptanceCount: { type: 'integer', description: 'Items waiting for this recipient to accept them' },
+                              changesRequestedCount: { type: 'integer', description: 'Items sent back to this recipient for rework' },
+                              skipped: { type: 'boolean', description: 'Delivery for this user and date already recorded' },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
           403: { description: 'Only system admin can run notification jobs manually', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },

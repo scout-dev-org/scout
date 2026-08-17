@@ -67,6 +67,8 @@ export type DailyDigestResult = {
     statusChangeCount: number;
     assignmentCount: number;
     typeChangeCount: number;
+    pendingAcceptanceCount: number;
+    changesRequestedCount: number;
     skipped: boolean;
   }>;
 };
@@ -689,6 +691,8 @@ export async function sendDailyDigests(options: SendDailyDigestsOptions = {}): P
       statusChangeCount: digest.statusChangeCount,
       assignmentCount: digest.assignmentCount,
       typeChangeCount: digest.typeChangeCount,
+      pendingAcceptanceCount: digest.actions.pendingAcceptance.length,
+      changesRequestedCount: digest.actions.changesRequested.length,
       skipped,
     });
 
