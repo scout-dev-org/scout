@@ -142,9 +142,9 @@ User APIs use `projectRoles` for per-project access assignment.
 
 ## Agent Skill
 
-Scout ships the `scout-manual-workflow` agent skill and one thin command, `/scout`. The repository skill is the only authored owner; it selects single-item, queue, delivery, and explicit audit workflows from the user's arguments and live Scout state.
+Scout ships the `scout-manual-workflow` agent skill and one thin command, `/scout`. The skill selects single-item, queue, delivery, and explicit audit workflows from the user's arguments and live Scout state.
 
-Both live in `.claude/` and load automatically for any agent session started inside this checkout. There is no projection, installer, or copied global copy to keep in sync: edit `.claude/skills/scout-manual-workflow/SKILL.md` and `.claude/commands/scout.md` in place.
+Both live in `.claude/` and load automatically for any agent session started inside this checkout. Edit `.claude/skills/scout-manual-workflow/SKILL.md` and `.claude/commands/scout.md` in place; there is no copy to keep in sync.
 
 Create an agent API key from the dashboard and store it in a password manager, shell environment, or local ignored `.env`, not in the repository.
 

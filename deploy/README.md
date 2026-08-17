@@ -34,6 +34,6 @@ Configure the `production` environment with these values:
 - Variable `DEPLOY_SOURCE_PATH` — server-side git checkout path used for Docker builds.
 - Optional variables `DEPLOY_COMPOSE_FILE`, `DEPLOY_SERVICE`, `DEPLOY_IMAGE`, `DEPLOY_BACKUP_PATH`, `DEPLOY_HEALTH_URL`.
 
-For KAFU-like bastion setups, set `DEPLOY_HOST` to the internal target host/IP and set `DEPLOY_BASTION_*` to the jump host values.
+Behind a bastion, set `DEPLOY_HOST` to the internal target host/IP and `DEPLOY_BASTION_*` to the jump host values.
 
 Obtain and verify bastion and target fingerprints through a trusted access source before setting the environment variables. The production server does not need a GitHub deploy key or token.

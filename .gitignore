@@ -13,7 +13,6 @@ storage/
 # Local AI/development agent files
 .playwright-mcp/
 .mcp.json
-docs/superpowers/
 
 # Test artifacts
 e2e/.token-cache.json
@@ -21,8 +20,6 @@ test-results/
 *.png
 
 # Local operator/deploy files
-scripts/local/
-scripts/*.local.*
 deploy/.env
 deploy/.env.*
 deploy/docker-compose.yml

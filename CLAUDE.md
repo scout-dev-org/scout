@@ -1,27 +1,24 @@
 # Scout
 
-These instructions apply only to this repository. Keep durable operator behavior here; keep credentials, production host values, local deploy notes, and one-off evidence out of tracked files.
+Self-hosted bug tracker: Hono API, SQLite, React dashboard and embeddable widget, all served by one process on port 10009.
 
-## Sources Of Truth
+## Layout
 
-- Product and operator overview: `README.md`.
-- Agent skill source: `.claude/skills/scout-manual-workflow/SKILL.md`.
-- Skill and command routing/provenance: `.claude/skills/README.md`.
-- Active project command source: `.claude/commands/scout.md`.
-- API contract for clients and agent workflows: live `/api/docs/openapi.json`; do not copy endpoint payload schemas into docs or skills as canonical field lists.
-- Development and verification commands: current `package.json`, `playwright.config.ts`, and repo scripts.
-- Production/deploy examples and restrictions: `deploy/README.md`; KAFU-specific local notes are ignored operator files, not portable repo policy.
+- `server/` - API: `routes/`, `services/`, `middleware/`, `db/` (Drizzle schema, client, seed).
+- `dashboard/` - React SPA served from `dashboard/dist`; UI strings in `dashboard/src/i18n` (ru/en/uz - every key goes into all three).
+- `widget/` - vanilla TS widget with its own `src/i18n.ts`, served from `widget/dist` under `/widget/`.
+- `test/` Vitest API tests, `e2e/` Playwright specs, `drizzle/` generated migrations, `deploy/` generic deploy examples only.
 
-## Workflow
+## Rules
 
-- Use `pnpm` scripts from the current `package.json`; do not invent parallel npm/yarn workflows.
-- For `/scout` behavior, update the repo-owned skill and command. Verify or change an external projection only when the task explicitly includes maintaining it.
-- Keep `/scout` as a thin entrypoint into `scout-manual-workflow`; lifecycle, status, endpoint, and evidence rules belong in the skill.
-- Treat live OpenAPI as the only endpoint/method/body/response source. If docs or skills disagree with live OpenAPI, update the lower-level text instead of adding fallback clients.
-- Production deploys require the documented GitHub Actions path from `master`; manual SSH deploy is not an automatic fallback.
+- `pnpm` only, scripts from `package.json`.
+- Live `/api/docs/openapi.json` is the only API contract for clients, docs and agent workflows. When any text disagrees with it, fix the text instead of adding a fallback client, and never copy payload schemas in as canonical field lists.
+- Schema change: edit `server/db/schema.ts`, then `pnpm db:generate`. The local database is disposable - reseed instead of adding corrective migrations.
+- Production deploys run only through the GitHub Actions deploy workflow from `master`; manual SSH deploy needs explicit approval for that incident.
+- Keep `/scout` a thin entry into `.claude/skills/scout-manual-workflow`; scope, transition and evidence rules belong to the skill.
+- Real hosts, compose files, credentials and one-off evidence stay out of tracked files.
 
 ## Verification
 
-- For code changes, run the narrowest relevant check first, then the canonical repo check needed for the touched surface: `pnpm typecheck`, `pnpm test`, `pnpm test:e2e`, or `pnpm build`.
-- For dashboard, widget, auth, route, or browser-state changes, verify with Playwright/browser evidence; API checks alone are not enough.
-- For `/scout` workflow changes, verify frontmatter, trigger boundaries, command/skill sync, live OpenAPI assumptions, and the exact status/evidence path affected.
+- `pnpm typecheck`, then `pnpm test` for server/API work and `pnpm test:e2e` for cross-surface flows.
+- Dashboard, widget, auth, routing or browser-state changes need Playwright/browser evidence; API checks alone are not enough.
