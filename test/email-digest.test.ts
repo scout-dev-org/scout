@@ -150,9 +150,13 @@ describe('Daily email digest', () => {
 
     const result = await sendDailyDigests({ date: '2026-06-09', transport: { sendMail } as any });
 
-    expect(result.summaries.map((summary) => summary.email)).toEqual(['admin@test.local']);
-    expect(result.summaries[0]).toMatchObject({ itemCount: 0, pendingAcceptanceCount: 1, changesRequestedCount: 0 });
-    const mail = sendMail.mock.calls[0][0] as any;
+    // The reporter is told first of all - the item waits for them, whatever project role they hold.
+    // The owner is told too, because they are the fallback when a reporter never comes back.
+    expect(result.summaries.map((summary) => summary.email).sort()).toEqual(['admin@test.local', 'member@test.local']);
+    for (const summary of result.summaries) {
+      expect(summary).toMatchObject({ itemCount: 0, pendingAcceptanceCount: 1, changesRequestedCount: 0 });
+    }
+    const mail = sendMail.mock.calls.map((call) => call[0] as any).find((sent) => sent.to === 'member@test.local');
     expect(mail.subject).toBe('Scout: 1 задача ждёт вашей приёмки — сводка за 2026-06-09');
     expect(mail.text).toContain('ЖДУТ ВАШЕЙ ПРИЁМКИ (1)');
     expect(mail.text).toContain('Кнопка сохранения не работает');

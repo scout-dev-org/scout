@@ -975,7 +975,7 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Принять item человеком',
-        description: 'Переводит item из done в verified после human acceptance. Не перетирает assignee, resolvedById или resolvedAt; переданный comment сохраняется атомарно с переходом. Конкурентное изменение состояния или revision возвращает 409. Требуется project permission `accept_item` (admin/owner/manager); purpose=agent API keys всегда запрещены, включая ключи system admin. JWT human sessions и другие API key purposes следуют обычной role/scope policy.',
+        description: 'Переводит item из done в verified после human acceptance. Не перетирает assignee, resolvedById или resolvedAt; переданный comment сохраняется атомарно с переходом. Конкурентное изменение состояния или revision возвращает 409. Принять может только автор item (reporterId), какая бы project role у него ни была, либо project owner - он же принимает item, заведённый виджетом без автора. Manager чужой item больше не принимает: тот, кто сделал работу, её не принимает. purpose=agent API keys всегда запрещены, включая ключи system admin и ключ, выпущенный на автора item.',
         security: AUTH_SECURITY,
         requestBody: {
           required: true,

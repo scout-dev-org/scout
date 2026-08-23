@@ -4,7 +4,7 @@ import { eq, and, desc, count, like, or, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { ITEM_STATUSES, scoutItems, scoutItemNotes, scoutItemEvidence, scoutItemLinks, projects, users, errorGroups, type ApiKey, type ItemSource, type ScoutItemLink } from '../db/schema.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { checkProjectAccess, hasProjectPermission, requireProjectPermission } from '../middleware/permissions.js';
+import { canAcceptItem, checkProjectAccess, hasProjectPermission, requireAcceptItem, requireProjectPermission } from '../middleware/permissions.js';
 import { randomUUID } from 'node:crypto';
 import { NotFoundError, ForbiddenError, ConflictError } from '../lib/errors.js';
 import {
@@ -66,7 +66,7 @@ function getItemPermissions(item: typeof scoutItems.$inferSelect, user: typeof u
   const isNote = item.itemType === 'note';
   const canWorkflow = hasProjectPermission(user.id, user.role, item.projectId, 'workflow', apiKey);
   const canTriage = hasProjectPermission(user.id, user.role, item.projectId, 'triage', apiKey);
-  const canAccept = hasProjectPermission(user.id, user.role, item.projectId, 'accept_item', apiKey);
+  const canAccept = canAcceptItem(user.id, user.role, item.projectId, item.reporterId, apiKey);
   const canComment = hasProjectPermission(user.id, user.role, item.projectId, 'comment', apiKey);
   const canUseGenericStatusUpdate = ['in_progress', 'review', 'changes_requested'].includes(item.status);
   const canCancelOwnNew = item.status === 'new' && item.reporterId === user.id && canComment;
@@ -381,9 +381,10 @@ export const itemRoutes = new Hono()
       const { id, updatedAt, comment, evidence } = c.req.valid('json');
       const user = c.get('user');
 
-      const existing = db.select({ projectId: scoutItems.projectId }).from(scoutItems).where(eq(scoutItems.id, id)).get();
+      const existing = db.select({ projectId: scoutItems.projectId, reporterId: scoutItems.reporterId })
+        .from(scoutItems).where(eq(scoutItems.id, id)).get();
       if (!existing) throw new NotFoundError('Item', 'ITEM_NOT_FOUND');
-      requireProjectPermission(user.id, user.role, existing.projectId, 'accept_item', c.get('apiKey'));
+      requireAcceptItem(user.id, user.role, existing.projectId, existing.reporterId, c.get('apiKey'));
 
       const trimmedComment = comment?.trim();
       const { item, note, oldStatus } = updateItemStatus(

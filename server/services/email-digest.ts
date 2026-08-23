@@ -3,7 +3,7 @@ import { and, eq, gte, inArray, lt } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
 import { emailDigestDeliveries, projects, scoutItemNotes, scoutItems, users, type ItemStatus, type ScoutItem, type ScoutItemNote, type User } from '../db/schema.js';
-import { hasProjectPermission } from '../middleware/permissions.js';
+import { canAcceptItem } from '../middleware/permissions.js';
 import { logger } from '../lib/logger.js';
 
 type DigestEventType = 'created' | 'status_change' | 'assignment' | 'type_change';
@@ -331,12 +331,13 @@ function getOpenActionsByUser(projectNames: Map<string, string>, digestDate: str
 
   const candidates = db.select().from(users).where(eq(users.isActive, true)).all()
     .filter((user) => isDeliverableDigestEmail(user.email));
+  // Keyed by the reporter too: acceptance follows who filed the item, not the project alone.
   const acceptCache = new Map<string, boolean>();
-  const canAccept = (user: User, projectId: string): boolean => {
-    const key = `${user.id}:${projectId}`;
+  const canAccept = (user: User, item: ScoutItem): boolean => {
+    const key = `${user.id}:${item.projectId}:${item.reporterId ?? ''}`;
     const cached = acceptCache.get(key);
     if (cached !== undefined) return cached;
-    const allowed = hasProjectPermission(user.id, user.role, projectId, 'accept_item');
+    const allowed = canAcceptItem(user.id, user.role, item.projectId, item.reporterId);
     acceptCache.set(key, allowed);
     return allowed;
   };
@@ -350,7 +351,7 @@ function getOpenActionsByUser(projectNames: Map<string, string>, digestDate: str
       continue;
     }
     for (const user of candidates) {
-      if (!canAccept(user, item.projectId)) continue;
+      if (!canAccept(user, item)) continue;
       if (isRecent(item)) actionsFor(user.id).pendingAcceptance.push(toActionItem(item, projectNames));
       else actionsFor(user.id).olderPendingCount += 1;
     }

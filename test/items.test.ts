@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import { itemRoutes } from '../server/routes/items.js';
 import { apiKeyRoutes } from '../server/routes/api-keys.js';
-import { projects, scoutItemEvidence, scoutItemNotes, scoutItems } from '../server/db/schema.js';
+import { pivotUsersProjects, projects, scoutItemEvidence, scoutItemNotes, scoutItems } from '../server/db/schema.js';
 import { createTestContext, type TestContext } from './helpers.js';
 import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
@@ -688,6 +688,52 @@ describe('Items routes', () => {
       updatedAt: current.data.updatedAt,
     }, customKey);
     expect(verifyRes.status).toBe(200);
+  });
+
+  it('POST /verify — the reporter accepts their own item on the reporter role alone', async () => {
+    const item = await createTestItem(ctx.memberToken);
+    await resolveTestItem(item.id);
+
+    const view = await (await post('/get', { id: item.id }, ctx.memberToken)).json() as any;
+    expect(view.data.permissions.canVerify).toBe(true);
+
+    const res = await post('/verify', { id: item.id, updatedAt: view.data.updatedAt }, ctx.memberToken);
+    expect(res.status).toBe(200);
+    expect((await res.json() as any).data.status).toBe('verified');
+  });
+
+  it('POST /verify — a manager does not accept an item somebody else reported', async () => {
+    ctx.db.update(pivotUsersProjects).set({ role: 'manager' })
+      .where(eq(pivotUsersProjects.userId, ctx.developerId)).run();
+    const item = await createTestItem(ctx.memberToken);
+    await resolveTestItem(item.id);
+
+    const view = await (await post('/get', { id: item.id }, ctx.developerToken)).json() as any;
+    expect(view.data.permissions.canVerify).toBe(false);
+
+    const res = await post('/verify', { id: item.id, updatedAt: view.data.updatedAt }, ctx.developerToken);
+    expect(res.status).toBe(403);
+  });
+
+  it('POST /verify — the owner accepts an item the widget filed without a reporter', async () => {
+    const item = await createTestItem();
+    ctx.db.update(scoutItems).set({ reporterId: null }).where(eq(scoutItems.id, item.id)).run();
+    await resolveTestItem(item.id);
+
+    const res = await post('/verify', { id: item.id }, ctx.adminToken);
+    expect(res.status).toBe(200);
+    expect((await res.json() as any).data.status).toBe('verified');
+  });
+
+  it('POST /verify — an agent key is refused even on an item its own user reported', async () => {
+    const item = await createTestItem();
+    await resolveTestItem(item.id);
+    const agentKey = await createProjectApiKey('agent');
+
+    const view = await (await post('/get', { id: item.id }, agentKey)).json() as any;
+    expect(view.data.permissions.canVerify).toBe(false);
+    const res = await post('/verify', { id: item.id, updatedAt: view.data.updatedAt }, agentKey);
+    expect(res.status).toBe(403);
   });
 
   it('POST /request-changes — triager can return a done item with actionable context', async () => {

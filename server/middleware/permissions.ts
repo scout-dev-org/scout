@@ -19,9 +19,13 @@ export type ProjectPermission =
   | 'manage_members'
   | 'manage_integrations';
 
+/**
+ * `accept_item` here means "may accept anything in the project", which only `owner` may. Accepting
+ * one's own report is not a role at all - see `canAcceptItem`, the only place acceptance is decided.
+ */
 const PROJECT_ROLE_PERMISSIONS: Record<ProjectRole, ProjectPermission[]> = {
   owner: ['view', 'create_item', 'comment', 'workflow', 'triage', 'accept_item', 'read_errors', 'write_errors', 'triage_errors', 'manage_project', 'manage_members', 'manage_integrations'],
-  manager: ['view', 'create_item', 'comment', 'workflow', 'triage', 'accept_item', 'read_errors', 'write_errors', 'triage_errors', 'manage_integrations'],
+  manager: ['view', 'create_item', 'comment', 'workflow', 'triage', 'read_errors', 'write_errors', 'triage_errors', 'manage_integrations'],
   developer: ['view', 'comment', 'workflow', 'read_errors'],
   reporter: ['view', 'create_item', 'comment'],
   viewer: ['view'],
@@ -102,5 +106,31 @@ export function hasProjectPermission(userId: string, role: string, projectId: st
 export function requireProjectPermission(userId: string, role: string, projectId: string, permission: ProjectPermission, apiKey?: ApiKey | null): void {
   if (!hasProjectPermission(userId, role, projectId, permission, apiKey)) {
     throw new ForbiddenError('Нет прав для этого действия в проекте', 'NO_PROJECT_PERMISSION');
+  }
+}
+
+/**
+ * Who may accept a finished item.
+ *
+ * Whoever reported it, whatever project role they hold: they are the one who said something was
+ * wrong, so they are the one who can say it is answered, and the role handed out for filing a report
+ * never carried acceptance. Nobody else may - the person who did the work does not sign off their own
+ * work, and an agent API key is refused acceptance outright.
+ *
+ * `owner` keeps the right to accept anything, because a report has no reporter when the widget files
+ * it anonymously, and a reporter who has left the project would otherwise leave the item waiting for
+ * a person who can never come back.
+ */
+export function canAcceptItem(userId: string, role: string, projectId: string, reporterId: string | null, apiKey?: ApiKey | null): boolean {
+  if (!hasApiKeyPermission(apiKey, projectId, 'accept_item')) return false;
+  const projectRole = getProjectRole(userId, role, projectId);
+  if (!projectRole) return false;
+  if (reporterId && reporterId === userId) return true;
+  return PROJECT_ROLE_PERMISSIONS[projectRole].includes('accept_item');
+}
+
+export function requireAcceptItem(userId: string, role: string, projectId: string, reporterId: string | null, apiKey?: ApiKey | null): void {
+  if (!canAcceptItem(userId, role, projectId, reporterId, apiKey)) {
+    throw new ForbiddenError('Принять задачу может её автор или владелец проекта', 'NO_PROJECT_PERMISSION');
   }
 }
