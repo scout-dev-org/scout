@@ -77,12 +77,23 @@ describe('Daily email digest', () => {
     expect(result.recipientCount).toBe(3);
     expect(result.sentCount).toBe(0);
     expect(result.summaries.map((summary) => summary.email).sort()).toEqual(['admin@test.local', 'developer@test.local', 'member@test.local']);
-    for (const summary of result.summaries.filter((summary) => summary.email !== 'admin@test.local')) {
-      expect(summary.itemCount).toBe(1);
-      expect(summary.createdItemCount).toBe(1);
-      expect(summary.statusChangeCount).toBe(2);
-      expect(summary.assignmentCount).toBe(1);
-    }
+    const byEmail = new Map(result.summaries.map((summary) => [summary.email, summary]));
+
+    // The reporter hears what the developer did to their item, and not that they filed it themselves.
+    expect(byEmail.get('member@test.local')).toMatchObject({
+      itemCount: 1,
+      createdItemCount: 0,
+      statusChangeCount: 2,
+      assignmentCount: 1,
+    });
+
+    // The developer made every one of those changes, so only the filing is news to them.
+    expect(byEmail.get('developer@test.local')).toMatchObject({
+      itemCount: 1,
+      createdItemCount: 1,
+      statusChangeCount: 0,
+      assignmentCount: 0,
+    });
   });
 
   it('skips Scout-local placeholder email addresses', async () => {

@@ -364,9 +364,16 @@ function getOpenActionsByUser(projectNames: Map<string, string>, digestDate: str
   return actionsByUser;
 }
 
+/**
+ * What happened to this person's items, not what this person did.
+ *
+ * Being the actor was enough to be told about an event, so the digest read back the recipient's own
+ * day to them. It is worst where the work is done through an API key issued to a real person: every
+ * status that key writes is that person's action, and the summary becomes a log of their own agent.
+ */
 function isUserRelatedToEvent(userId: string, event: DigestEvent): boolean {
-  return event.actorId === userId ||
-    event.item.reporterId === userId ||
+  if (event.actorId === userId) return false;
+  return event.item.reporterId === userId ||
     event.item.assigneeId === userId ||
     event.item.resolvedById === userId;
 }
