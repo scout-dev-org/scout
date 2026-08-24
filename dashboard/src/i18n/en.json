@@ -466,7 +466,6 @@
   "errors.DEDICATED_VERIFICATION_ENDPOINT_REQUIRED": "Use the dedicated verification or request-changes action",
   "errors.NOTE_REQUIRES_TRIAGE": "Convert the note to a task first",
   "errors.VALIDATION_FAILED": "Validation error",
-  "errors.RATE_LIMITED": "Too many requests, please try again later",
   "errors.USER_INACTIVE": "Account is deactivated",
   "errors.API_KEY_INVALID": "Invalid API key",
   "errors.API_KEY_EXPIRED": "API key expired",

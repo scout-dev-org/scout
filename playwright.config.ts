@@ -4,7 +4,7 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 60_000,
   retries: 0,
-  workers: 1, // Serial — avoids rate limit collisions between browser projects
+  workers: 3, // One per browser project — they share one database, so keep it at the project count
   use: {
     baseURL: 'http://localhost:10020',
     headless: true,

@@ -20,7 +20,6 @@ import { db, sqlite } from './db/client.js';
 import { projects, scoutItems } from './db/schema.js';
 import { eq, or } from 'drizzle-orm';
 import { securityHeaders } from './middleware/security-headers.js';
-import { rateLimit } from './middleware/rate-limit.js';
 import { authMiddleware, storageAuth } from './middleware/auth.js';
 import { checkProjectAccess } from './middleware/permissions.js';
 import { logger } from './lib/logger.js';
@@ -142,19 +141,11 @@ app.use('/api/*', cors({
   credentials: true,
 }));
 
-// --- SSE (registered before rate limiter — long-lived connections) ---
+// --- SSE (long-lived connections) ---
 app.route('/api/events', eventRoutes);
 
-// --- API Docs (public, no auth/rate-limit) ---
+// --- API Docs (public, no auth) ---
 app.route('/api/docs', docsRoutes);
-
-// --- Rate limiting ---
-// Auth routes: 5 req/min per IP (brute-force protection)
-app.use('/api/auth/*', rateLimit(60_000, 5));
-// Item creation: 20 req/min per IP
-app.use('/api/items/create', rateLimit(60_000, 20));
-// All API routes: 100 req/min per IP
-app.use('/api/*', rateLimit(60_000, 100));
 
 const apiRoutes = new Hono();
 apiRoutes.route('/auth', authRoutes);

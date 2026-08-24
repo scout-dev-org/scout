@@ -466,7 +466,6 @@
   "errors.DEDICATED_VERIFICATION_ENDPOINT_REQUIRED": "Используйте отдельное действие проверки или запроса правок",
   "errors.NOTE_REQUIRES_TRIAGE": "Заметку нужно сначала сделать задачей",
   "errors.VALIDATION_FAILED": "Ошибка валидации",
-  "errors.RATE_LIMITED": "Слишком много запросов, попробуйте позже",
   "errors.USER_INACTIVE": "Аккаунт деактивирован",
   "errors.API_KEY_INVALID": "Недействительный API-ключ",
   "errors.API_KEY_EXPIRED": "API-ключ истёк",

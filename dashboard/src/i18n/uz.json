@@ -466,7 +466,6 @@
   "errors.DEDICATED_VERIFICATION_ENDPOINT_REQUIRED": "Alohida tekshiruv yoki o'zgartirish so'rash amalidan foydalaning",
   "errors.NOTE_REQUIRES_TRIAGE": "Avval eslatmani topshiriqqa aylantiring",
   "errors.VALIDATION_FAILED": "Tekshiruv xatoligi",
-  "errors.RATE_LIMITED": "Juda ko'p so'rovlar, keyinroq urinib ko'ring",
   "errors.USER_INACTIVE": "Hisob faolsizlantirilgan",
   "errors.API_KEY_INVALID": "Yaroqsiz API kalit",
   "errors.API_KEY_EXPIRED": "API kalit muddati tugagan",

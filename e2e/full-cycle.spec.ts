@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,21 +23,10 @@ const E2E_COMMIT_SHA = execFileSync('git', ['rev-parse', 'HEAD'], {
   encoding: 'utf8',
 }).trim();
 const ONE_PIXEL_IMAGE_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
-let e2eRequestCounter = 0;
-
-// Shared token cache file — avoids rate-limited logins between browser projects
-const TOKEN_CACHE = process.env.SCOUT_E2E_TOKEN_CACHE || join(__dirname, '.token-cache.json');
-
 // Helpers
-function nextE2eClientIp(): string {
-  e2eRequestCounter += 1;
-  return `10.42.${Math.floor(e2eRequestCounter / 200)}.${(e2eRequestCounter % 200) + 1}`;
-}
-
 async function apiPost(path: string, body: object, token?: string) {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'x-forwarded-for': nextE2eClientIp(),
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(`${API}/api${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
@@ -46,15 +34,8 @@ async function apiPost(path: string, body: object, token?: string) {
 }
 
 async function login(email: string, password: string): Promise<string> {
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const { status, data } = await apiPost('/auth/login', { email, password });
-    if (status === 429) {
-      await new Promise((r) => setTimeout(r, 12_000));
-      continue;
-    }
-    return data?.data?.token as string;
-  }
-  throw new Error('Login failed after retries (rate limited)');
+  const { data } = await apiPost('/auth/login', { email, password });
+  return data?.data?.token as string;
 }
 
 function passingEvidence(scenario: string, action: string, visibleResult: string, extra: Record<string, string> = {}) {
@@ -79,35 +60,12 @@ test.describe('Full bug lifecycle', () => {
   let projectId: string;
 
   test.beforeAll(async () => {
-    test.setTimeout(120_000);
-
-    // Reuse token from previous browser project (avoids rate limit)
-    if (existsSync(TOKEN_CACHE)) {
-      try {
-        const cached = JSON.parse(readFileSync(TOKEN_CACHE, 'utf-8'));
-        if (cached.adminToken && cached.projectId) {
-          const { status, data } = await apiPost('/projects/list', {}, cached.adminToken);
-          const projectExists = data?.data?.items?.some(
-            (project: { id?: string }) => project.id === cached.projectId,
-          );
-          if (status === 200 && projectExists) {
-            adminToken = cached.adminToken;
-            projectId = cached.projectId;
-            return;
-          }
-        }
-      } catch { /* cache corrupt — re-login */ }
-    }
-
     adminToken = await login('admin@scout.local', 'admin');
     expect(adminToken).toBeTruthy();
 
     const { data } = await apiPost('/projects/list', {}, adminToken);
     projectId = data?.data?.items?.[0]?.id;
     expect(projectId).toBeTruthy();
-
-    // Cache for other browser projects
-    writeFileSync(TOKEN_CACHE, JSON.stringify({ adminToken, projectId }));
   });
 
   test('1. Widget: create bug via API (simulating widget)', async () => {
@@ -132,7 +90,6 @@ test.describe('Full bug lifecycle', () => {
   });
 
   test('2. Dashboard: login and see bug list', async ({ page }) => {
-    // Reuse adminToken from beforeAll (avoids extra rate-limited login call)
     await page.goto(DASHBOARD);
     await page.evaluate((tk) => {
       localStorage.setItem('scout_token', tk);
@@ -309,8 +266,6 @@ test.describe('Full bug lifecycle', () => {
   });
 
   test('4. API: project access isolation', async () => {
-    test.setTimeout(120_000); // Member login may wait for rate limit reset
-
     // Create a second project (admin only)
     const { data: proj } = await apiPost('/projects/create', {
       name: 'Isolated E2E', slug: `isolated-e2e-${Date.now()}`,
@@ -346,9 +301,7 @@ test.describe('Full bug lifecycle', () => {
   });
 
   test('6. API: OpenAPI spec is valid', async () => {
-    const res = await fetch(`${API}/api/docs/openapi.json`, {
-      headers: { 'x-forwarded-for': nextE2eClientIp() },
-    });
+    const res = await fetch(`${API}/api/docs/openapi.json`);
     expect(res.status).toBe(200);
     const spec = await res.json();
     expect(spec.openapi).toBe('3.0.3');
@@ -363,16 +316,6 @@ test.describe('Full bug lifecycle', () => {
     expect(res.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin');
   });
 
-  test('8. API: rate limiting headers present', async () => {
-    const res = await fetch(`${API}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': nextE2eClientIp() },
-      body: JSON.stringify({ email: 'admin@scout.local', password: 'admin' }),
-    });
-    expect(res.headers.get('x-ratelimit-limit')).toBeTruthy();
-    expect(res.headers.get('x-ratelimit-remaining')).toBeTruthy();
-  });
-
   test('9. API: API key lifecycle', async () => {
     // Create API key
     const { status, data } = await apiPost('/api-keys/create', {
@@ -382,10 +325,9 @@ test.describe('Full bug lifecycle', () => {
     const fullKey = data.data.key;
     expect(fullKey).toMatch(/^sk_live_/);
 
-    // Use API key to call /items/count (less rate-limited path than /auth/*)
     const countRes = await fetch(`${API}/api/items/count`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${fullKey}`, 'x-forwarded-for': nextE2eClientIp() },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${fullKey}` },
       body: JSON.stringify({ projectId }),
     });
     expect(countRes.status).toBe(200);
@@ -397,7 +339,7 @@ test.describe('Full bug lifecycle', () => {
     // Revoked key should fail
     const countRes2 = await fetch(`${API}/api/items/count`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${fullKey}`, 'x-forwarded-for': nextE2eClientIp() },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${fullKey}` },
       body: JSON.stringify({ projectId }),
     });
     expect(countRes2.status).toBe(401);

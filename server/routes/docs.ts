@@ -508,7 +508,7 @@ const spec = {
       post: {
         tags: ['Auth'],
         summary: 'Вход в систему',
-        description: 'Возвращает JWT-токен и данные пользователя. Rate limit: 5 req/min.',
+        description: 'Возвращает JWT-токен и данные пользователя.',
         requestBody: {
           required: true,
           content: {
@@ -651,7 +651,7 @@ const spec = {
       post: {
         tags: ['Items'],
         summary: 'Создать item',
-        description: 'Создаёт баг, заметку или задачу в проекте. Виджет по умолчанию создаёт bug; заметки нужно преобразовать в task перед workflow-работой. Требуется project permission `create_item` (admin/owner/manager/reporter). Rate limit: 20 req/min.',
+        description: 'Создаёт баг, заметку или задачу в проекте. Виджет по умолчанию создаёт bug; заметки нужно преобразовать в task перед workflow-работой. Требуется project permission `create_item` (admin/owner/manager/reporter).',
         security: AUTH_SECURITY,
         requestBody: {
           required: true,
@@ -2106,7 +2106,7 @@ const spec = {
         tags: ['Events'],
         summary: 'Real-time события (SSE)',
         description:
-          'Server-Sent Events stream. Авторизация через query parameter `token` (EventSource не поддерживает заголовки). Опциональный фильтр по projectId. Путь: GET /api/events/stream (зарегистрирован ДО rate limiter).',
+          'Server-Sent Events stream. Авторизация через query parameter `token` (EventSource не поддерживает заголовки). Опциональный фильтр по projectId. Путь: GET /api/events/stream.',
         parameters: [
           {
             name: 'token',
