@@ -161,11 +161,18 @@ test.describe('Widget pointer handling', () => {
       (host.shadowRoot?.querySelector('.scout-fab') as HTMLElement).click();
     });
 
+    // Wait only for the banner to finish sliding in - it must already be an icon
+    // by then, never a bar the person has to sit through.
     await page.waitForFunction(() => {
       const host = document.querySelector('#scout-widget-root') as HTMLElement | null;
-      return Boolean(host?.shadowRoot?.querySelector('.scout-picker-banner.collapsed'));
+      return Boolean(host?.shadowRoot?.querySelector('.scout-picker-banner.visible'));
     });
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(400);
+
+    await expect(page.evaluate(() => {
+      const host = document.querySelector('#scout-widget-root') as HTMLElement;
+      return host.shadowRoot!.querySelector('.scout-picker-banner')!.classList.contains('collapsed');
+    })).resolves.toBe(true);
 
     // Sample a grid of points and count the ones the widget makes unusable for
     // reporting: either its chrome hides the page there, or it eats the pointer.

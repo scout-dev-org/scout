@@ -89,25 +89,18 @@ export function pickElement(
     // Trigger animation
     requestAnimationFrame(() => banner.classList.add('visible'));
 
-    // On narrow screens the banner covers the bottom of the page, so it shrinks
-    // to an icon shortly after showing the hint and can be reopened by tapping it.
-    let autoCollapse: number | undefined;
-
+    // A bar across the bottom of a phone viewport hides the part of the page most
+    // worth reporting, so there it is an icon from the start and opens on tap.
     function setCollapsed(collapsed: boolean): void {
       banner.classList.toggle('collapsed', collapsed);
       toggle.setAttribute('aria-label', t(collapsed ? 'picker.expand' : 'picker.collapse'));
       toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     }
 
-    setCollapsed(false);
-
-    if (window.matchMedia('(max-width: 640px)').matches) {
-      autoCollapse = window.setTimeout(() => setCollapsed(true), 2500);
-    }
+    setCollapsed(window.matchMedia('(max-width: 640px)').matches);
 
     toggle.addEventListener('click', (e) => {
       e.stopPropagation();
-      window.clearTimeout(autoCollapse);
       setCollapsed(!banner.classList.contains('collapsed'));
     });
 
@@ -282,7 +275,6 @@ export function pickElement(
     }
 
     function cleanup(): void {
-      window.clearTimeout(autoCollapse);
       overlay.classList.add('hidden');
       highlight.classList.add('hidden');
       banner.classList.remove('visible');
