@@ -63,6 +63,15 @@ async function init(): Promise<void> {
   host.style.cssText = 'display:block;width:0;height:0;overflow:visible;pointer-events:none';
 
   document.body.appendChild(host);
+
+  // Host pages stack their own modals with ever larger z-index values - one of
+  // them already sat a single step above the widget and hid the button. The top
+  // layer is above every z-index there is, so the widget stops competing on
+  // numbers. A manual popover joins it without making the page inert.
+  if ('popover' in HTMLElement.prototype) {
+    host.setAttribute('popover', 'manual');
+    host.showPopover();
+  }
   const shadow = host.attachShadow({ mode: 'open' });
 
   // Inject styles

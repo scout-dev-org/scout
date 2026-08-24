@@ -143,6 +143,47 @@ test.describe('Widget pointer handling', () => {
     });
   });
 
+  // A host page put its modal one step above the widget's highest layer and hid
+  // the button, so the widget stopped competing on numbers: the top layer is
+  // above every z-index a page can name.
+  test('widget outranks host chrome at any z-index', async ({ page }) => {
+    await page.addInitScript((token) => {
+      localStorage.setItem('__scout_token__', token);
+      localStorage.setItem('__scout_user__', JSON.stringify({ id: 'e2e-user', email: 'e2e@example.test', name: 'E2E User' }));
+    }, VALID_TEST_TOKEN);
+
+    await page.goto(DEMO);
+    await waitForFab(page);
+
+    for (const z of [1000011, 2147483647]) {
+      const hit = await page.evaluate((zi) => {
+        document.querySelector('#host-modal')?.remove();
+        const modal = document.createElement('div');
+        modal.id = 'host-modal';
+        modal.style.cssText = `position:fixed;top:0;right:0;bottom:0;left:0;background:rgba(0,0,0,0.5);z-index:${zi}`;
+        document.body.appendChild(modal);
+
+        const host = document.querySelector('#scout-widget-root') as HTMLElement;
+        const rect = (host.shadowRoot?.querySelector('.scout-fab') as HTMLElement).getBoundingClientRect();
+        const found = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        return { id: found?.id ?? null, inTopLayer: host.matches(':popover-open') };
+      }, z);
+
+      expect(hit.id).toBe('scout-widget-root');
+      expect(hit.inTopLayer).toBe(true);
+    }
+
+    // Taking the host back out of the top layer must hand the modal the win -
+    // otherwise this test would pass for the wrong reason.
+    const withoutTopLayer = await page.evaluate(() => {
+      const host = document.querySelector('#scout-widget-root') as HTMLElement & { hidePopover?: () => void };
+      const rect = (host.shadowRoot?.querySelector('.scout-fab') as HTMLElement).getBoundingClientRect();
+      host.hidePopover?.();
+      return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.id ?? null;
+    });
+    expect(withoutTopLayer).toBe('host-modal');
+  });
+
   // The picker banner used to sit as a full-width bar at the bottom of a phone
   // viewport, so nothing under it could be reported at all.
   test('active picker leaves the whole narrow viewport reachable', async ({ page }) => {

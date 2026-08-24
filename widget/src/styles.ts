@@ -1,6 +1,17 @@
 export const WIDGET_STYLES = `
   :host {
     all: initial;
+    /* Neutralise the UA styles that come with [popover]: it is a top-layer
+       anchor for fixed-position children, not a box of its own. */
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: auto;
+    bottom: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
     display: block;
     width: 0;
     height: 0;
