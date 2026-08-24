@@ -142,4 +142,66 @@ test.describe('Widget pointer handling', () => {
       return Boolean(backdrops.every((el) => el.classList.contains('hidden')) && fab && !fab.classList.contains('hidden'));
     });
   });
+
+  // The picker banner used to sit as a full-width bar at the bottom of a phone
+  // viewport, so nothing under it could be reported at all.
+  test('active picker leaves the whole narrow viewport reachable', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    await page.addInitScript((token) => {
+      localStorage.setItem('__scout_token__', token);
+      localStorage.setItem('__scout_user__', JSON.stringify({ id: 'e2e-user', email: 'e2e@example.test', name: 'E2E User' }));
+    }, VALID_TEST_TOKEN);
+
+    await page.goto(DEMO);
+    await waitForFab(page);
+
+    await page.evaluate(() => {
+      const host = document.querySelector('#scout-widget-root') as HTMLElement;
+      (host.shadowRoot?.querySelector('.scout-fab') as HTMLElement).click();
+    });
+
+    await page.waitForFunction(() => {
+      const host = document.querySelector('#scout-widget-root') as HTMLElement | null;
+      return Boolean(host?.shadowRoot?.querySelector('.scout-picker-banner.collapsed'));
+    });
+    await page.waitForTimeout(300);
+
+    // Sample a grid of points and count the ones the widget makes unusable for
+    // reporting: either its chrome hides the page there, or it eats the pointer.
+    // The picker overlay and highlight are excluded — a translucent tint and an
+    // outline keep the page both visible and pickable.
+    const coverage = await page.evaluate(() => {
+      const host = document.querySelector('#scout-widget-root') as HTMLElement;
+      const shadow = host.shadowRoot as ShadowRoot;
+      const overlay = shadow.querySelector('.scout-overlay') as HTMLElement;
+
+      const opaque = Array.from(shadow.querySelectorAll('*'))
+        .filter((el) => !el.closest('.scout-overlay') && !el.classList.contains('scout-highlight'))
+        .map((el) => ({ el: el as HTMLElement, rect: el.getBoundingClientRect() }))
+        .filter(({ el, rect }) => rect.width > 0 && rect.height > 0 && Number(getComputedStyle(el).opacity) > 0.01)
+        .map(({ rect }) => rect);
+
+      const step = 30;
+      let sampled = 0;
+      let unusable = 0;
+
+      overlay.style.pointerEvents = 'none';
+      for (let y = step / 2; y < window.innerHeight; y += step) {
+        for (let x = step / 2; x < window.innerWidth; x += step) {
+          sampled += 1;
+          const hit = document.elementFromPoint(x, y);
+          const eaten = Boolean(hit && (hit.id === 'scout-widget-root' || hit.closest('#scout-widget-root')));
+          const hidden = opaque.some((r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom);
+          if (eaten || hidden) unusable += 1;
+        }
+      }
+      overlay.style.pointerEvents = '';
+
+      return { sampled, unusable };
+    });
+
+    expect(coverage.sampled).toBeGreaterThan(300);
+    expect(coverage.unusable / coverage.sampled).toBeLessThan(0.03);
+  });
 });

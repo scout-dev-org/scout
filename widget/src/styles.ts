@@ -29,8 +29,7 @@ export const WIDGET_STYLES = `
   .scout-overlay,
   .scout-panel-backdrop,
   .scout-panel,
-  .scout-loading-overlay,
-  .scout-toast {
+  .scout-loading-overlay {
     pointer-events: auto;
   }
 
@@ -150,11 +149,34 @@ export const WIDGET_STYLES = `
     transform: translate(-50%, 0);
   }
 
-  .scout-picker-banner-text {
+  .scout-picker-banner-head {
     display: flex;
     align-items: center;
     flex: 1;
     gap: 8px;
+    min-width: 0;
+  }
+
+  .scout-picker-banner-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+    font-family: inherit;
+    cursor: default;
+    pointer-events: none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .scout-picker-banner-text {
     min-width: 0;
     line-height: 1.35;
   }
@@ -242,6 +264,54 @@ export const WIDGET_STYLES = `
     .scout-picker-banner-cancel {
       flex: 1;
       justify-content: center;
+    }
+
+    /* Collapsed to an icon so the picker can reach the bottom of the page */
+    .scout-picker-banner-toggle {
+      width: 32px;
+      height: 32px;
+      background: rgba(255, 255, 255, 0.14);
+      cursor: pointer;
+      pointer-events: auto;
+    }
+
+    .scout-picker-banner-toggle:active {
+      background: rgba(255, 255, 255, 0.26);
+    }
+
+    .scout-picker-banner.collapsed {
+      left: auto;
+      right: calc(10px + var(--safe-right));
+      width: 52px;
+      height: 52px;
+      padding: 0;
+      border-radius: 50%;
+      transform: translate(0, calc(100% + 24px));
+    }
+
+    .scout-picker-banner.collapsed.visible {
+      transform: translate(0, 0);
+    }
+
+    .scout-picker-banner.collapsed .scout-picker-banner-text,
+    .scout-picker-banner.collapsed .scout-picker-banner-actions {
+      display: none;
+    }
+
+    .scout-picker-banner.collapsed .scout-picker-banner-head {
+      justify-content: center;
+    }
+
+    .scout-picker-banner.collapsed .scout-picker-banner-toggle {
+      width: 100%;
+      height: 100%;
+      background: transparent;
+    }
+
+    .scout-picker-banner.collapsed .scout-picker-banner-icon {
+      width: 22px;
+      height: 22px;
+      opacity: 1;
     }
   }
 
@@ -705,7 +775,10 @@ export const WIDGET_STYLES = `
   }
 
   /* Toast */
+  /* Always in the DOM and only faded in, so it must never take a page click:
+     as an interactive element it swallowed a strip along the bottom of the page. */
   .scout-toast {
+    pointer-events: none;
     position: fixed;
     bottom: calc(92px + var(--safe-bottom));
     right: calc(24px + var(--safe-right));

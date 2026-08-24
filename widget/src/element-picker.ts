@@ -34,6 +34,12 @@ export function pickElement(
     const banner = document.createElement('div');
     banner.className = 'scout-picker-banner';
 
+    const head = document.createElement('div');
+    head.className = 'scout-picker-banner-head';
+
+    const toggle = document.createElement('button');
+    toggle.className = 'scout-picker-banner-toggle';
+
     const bannerText = document.createElement('span');
     bannerText.className = 'scout-picker-banner-text';
 
@@ -57,7 +63,7 @@ export function pickElement(
     bannerIcon.appendChild(line1);
     bannerIcon.appendChild(line2);
 
-    bannerText.appendChild(bannerIcon);
+    toggle.appendChild(bannerIcon);
     bannerText.appendChild(document.createTextNode(t('picker.hint')));
 
     const actions = document.createElement('div');
@@ -72,7 +78,9 @@ export function pickElement(
     cancelBtn.setAttribute('aria-label', t('picker.cancel'));
     cancelBtn.textContent = t('picker.cancel');
 
-    banner.appendChild(bannerText);
+    head.appendChild(toggle);
+    head.appendChild(bannerText);
+    banner.appendChild(head);
     actions.appendChild(noteBtn);
     actions.appendChild(cancelBtn);
     banner.appendChild(actions);
@@ -80,6 +88,28 @@ export function pickElement(
 
     // Trigger animation
     requestAnimationFrame(() => banner.classList.add('visible'));
+
+    // On narrow screens the banner covers the bottom of the page, so it shrinks
+    // to an icon shortly after showing the hint and can be reopened by tapping it.
+    let autoCollapse: number | undefined;
+
+    function setCollapsed(collapsed: boolean): void {
+      banner.classList.toggle('collapsed', collapsed);
+      toggle.setAttribute('aria-label', t(collapsed ? 'picker.expand' : 'picker.collapse'));
+      toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    }
+
+    setCollapsed(false);
+
+    if (window.matchMedia('(max-width: 640px)').matches) {
+      autoCollapse = window.setTimeout(() => setCollapsed(true), 2500);
+    }
+
+    toggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.clearTimeout(autoCollapse);
+      setCollapsed(!banner.classList.contains('collapsed'));
+    });
 
     cancelBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -252,6 +282,7 @@ export function pickElement(
     }
 
     function cleanup(): void {
+      window.clearTimeout(autoCollapse);
       overlay.classList.add('hidden');
       highlight.classList.add('hidden');
       banner.classList.remove('visible');
