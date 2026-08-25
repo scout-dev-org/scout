@@ -34,6 +34,7 @@ const pendingMessages = new Map<number, (data: Record<string, unknown>) => void>
 const SSO_IFRAME_TIMEOUT_MS = 2_000;
 const SSO_MSG_TIMEOUT_MS = 1_500;
 const POPUP_POLL_INTERVAL_MS = 300;
+const POPUP_GIVE_UP_MS = 120_000;
 const TOKEN_REFRESH_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 let refreshPromise: Promise<string | null> | null = null;
@@ -209,10 +210,22 @@ function startIframeSSO(apiUrl: string): void {
 // ============================================================
 
 /**
+ * A native WebView sends `window.open` to the system browser, which has no `opener` to answer on and
+ * whose `closed` never turns true. The popup promise then never settled: the host app hid its button
+ * waiting for an answer that could not arrive, and the only way out was restarting the app.
+ */
+export function hasPopupChannel(): boolean {
+  const nativeBridge = (window as unknown as { Capacitor?: unknown; cordova?: unknown; ReactNativeWebView?: unknown });
+  return !nativeBridge.Capacitor && !nativeBridge.cordova && !nativeBridge.ReactNativeWebView;
+}
+
+/**
  * Try to authenticate via popup SSO.
- * Returns true if authenticated, false if popup was blocked/closed.
+ * Returns true if authenticated, false if popup was blocked/closed/unanswerable.
  */
 export function tryPopupSSO(apiUrl: string): Promise<boolean> {
+  if (!hasPopupChannel()) return Promise.resolve(false);
+
   return new Promise((resolve) => {
     let resolved = false;
 
@@ -221,8 +234,12 @@ export function tryPopupSSO(apiUrl: string): Promise<boolean> {
       resolved = true;
       window.removeEventListener('message', onMessage);
       clearInterval(pollTimer);
+      clearTimeout(giveUpTimer);
       resolve(result);
     }
+
+    // A browser that neither answers nor reports the window closed must still let the caller move on.
+    const giveUpTimer = setTimeout(() => done(false), POPUP_GIVE_UP_MS);
 
     const w = 420;
     const h = 540;

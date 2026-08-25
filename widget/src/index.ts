@@ -368,18 +368,26 @@ async function init(): Promise<void> {
       return;
     }
 
-    // No token — try popup SSO first (cross-domain, all browsers)
+    // No token — try popup SSO first (cross-domain, all browsers). Inside a native WebView there is no
+    // popup to answer, so this returns at once and the inline form takes over.
     fabBusy = true;
     hideFab(fab);
-    const ssoOk = await tryPopupSSO(apiUrl);
-    fabBusy = false;
+    let ssoOk = false;
+    try {
+      ssoOk = await tryPopupSSO(apiUrl);
+    } finally {
+      fabBusy = false;
+      // The button must never stay hidden waiting for an answer: that left the widget unreachable
+      // until the app was restarted.
+      if (!ssoOk) showFab(fab);
+    }
 
     if (ssoOk) {
       startScoutMode();
       return;
     }
 
-    // Popup blocked or user closed — fall back to inline login
+    // Popup blocked, closed, or unanswerable — fall back to inline login
     showLoginForm();
   });
   shadow.appendChild(fab);
