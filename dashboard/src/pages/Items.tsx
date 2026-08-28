@@ -124,20 +124,27 @@ function getInitialPage(params: URLSearchParams) {
 export default function Items() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const currentSearchParams = searchParams.toString();
   const admin = isAdmin();
   const { t, locale } = useTranslation();
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string>(() => searchParams.get('project') ?? getStoredSelectedProjectId());
   const [items, setItems] = useState<Item[]>([]);
-  const [pagination, setPagination] = useState<PaginationData>({
-    page: getInitialPage(searchParams),
+
+  // The address bar owns the project and every filter. Nothing mirrors them back into it,
+  // so a navigation started by one control can never be overwritten by another one's state.
+  const selectedProject = searchParams.get('project') ?? '';
+  const queueFilter = getInitialQueue(searchParams);
+  const itemTypeFilter = getInitialItemType(searchParams);
+  const priorityFilter = getInitialPriority(searchParams);
+  const assigneeFilter = searchParams.get('assignee') ?? '';
+  const authorFilter = searchParams.get('author') ?? '';
+  const search = searchParams.get('q') ?? '';
+  const page = getInitialPage(searchParams);
+
+  const [pageMeta, setPageMeta] = useState<Omit<PaginationData, 'page'>>({
     perPage: 20,
     total: 0,
     totalPages: 1,
   });
-  const queueFilter = getInitialQueue(searchParams);
-  const [itemTypeFilter, setItemTypeFilter] = useState<string>(() => getInitialItemType(searchParams));
   const [counts, setCounts] = useState<Counts>({
     new: 0,
     in_progress: 0,
@@ -156,53 +163,39 @@ export default function Items() {
   const [createSaving, setCreateSaving] = useState(false);
   const [createError, setCreateError] = useState('');
 
-  // Search state
-  const [search, setSearch] = useState(() => searchParams.get('q') ?? '');
-  const [searchInput, setSearchInput] = useState(() => searchParams.get('q') ?? '');
+  const [searchInput, setSearchInput] = useState(search);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  // Priority filter state
-  const [priorityFilter, setPriorityFilter] = useState<string>(() => getInitialPriority(searchParams));
-
-  // Assignee and author filter state
   const [teamUsers, setTeamUsers] = useState<UserListItem[]>([]);
-  const [assigneeFilter, setAssigneeFilter] = useState<string>(() => searchParams.get('assignee') ?? '');
-  const [authorFilter, setAuthorFilter] = useState<string>(() => searchParams.get('author') ?? '');
+
+  /** Apply a filter change: rewrite the address bar, always back to the first page. */
+  const applyFilter = useCallback((mutate: (params: URLSearchParams) => void, push = false) => {
+    const next = new URLSearchParams(searchParams);
+    mutate(next);
+    if (selectedProject) next.set('project', selectedProject);
+    next.delete('page');
+    setSearchParams(next, { replace: !push });
+  }, [searchParams, selectedProject, setSearchParams]);
 
   const { openCounts, reload: reloadOpenCounts } = useProjectOpenCounts(projects.map((p) => p.id));
 
   // Load projects
   useEffect(() => {
-    api<{ items: Project[] }>('/api/projects/list', { perPage: 100 }).then(
-      (res) => {
-        setProjects(res.items);
-        setSelectedProject((current) => {
-          const next = findSelectableProjectId(res.items, current, getStoredSelectedProjectId());
-          storeSelectedProjectId(next);
-          return next;
-        });
-      },
-    ).catch(() => {});
+    api<{ items: Project[] }>('/api/projects/list', { perPage: 100 })
+      .then((res) => setProjects(res.items))
+      .catch(() => {});
   }, []);
 
+  // Put a usable project in the address bar when it arrives without one.
   useEffect(() => {
-    if (!selectedProject) return;
-
-    const next = new URLSearchParams();
-    next.set('project', selectedProject);
-    if (itemTypeFilter !== 'all') next.set('type', itemTypeFilter);
-    if (queueFilter !== DEFAULT_QUEUE) next.set('queue', queueFilter);
-    if (pagination.page > 1) next.set('page', String(pagination.page));
-    if (search) next.set('q', search);
-    if (priorityFilter) next.set('priority', priorityFilter);
-    if (assigneeFilter) next.set('assignee', assigneeFilter);
-    if (authorFilter) next.set('author', authorFilter);
-
-    const nextString = next.toString();
-    if (nextString !== currentSearchParams) {
-      setSearchParams(next, { replace: true });
-    }
-  }, [selectedProject, itemTypeFilter, queueFilter, pagination.page, search, priorityFilter, assigneeFilter, authorFilter, currentSearchParams, setSearchParams]);
+    if (projects.length === 0) return;
+    const next = findSelectableProjectId(projects, selectedProject, getStoredSelectedProjectId());
+    if (!next) return;
+    storeSelectedProjectId(next);
+    if (next === selectedProject) return;
+    const params = new URLSearchParams(searchParams);
+    params.set('project', next);
+    setSearchParams(params, { replace: true });
+  }, [projects, selectedProject, searchParams, setSearchParams]);
 
   // Load users for assignee filter (admin only)
   useEffect(() => {
@@ -220,7 +213,7 @@ export default function Items() {
 
     const body: Record<string, unknown> = {
       projectId: selectedProject,
-      page: pagination.page,
+      page,
       perPage: 20,
     };
     const queueStatuses = getQueue(queueFilter).statuses;
@@ -257,13 +250,13 @@ export default function Items() {
     ])
       .then(([listRes, countRes, improvementRes]) => {
         setItems(listRes.items);
-        setPagination(listRes.pagination);
+        setPageMeta(listRes.pagination);
         setCounts(countRes.counts);
         setImprovementCount(Object.values(improvementRes.counts).reduce((sum, value) => sum + value, 0));
       })
       .catch(() => {})
       .finally(() => { if (showLoading) setLoading(false); });
-  }, [selectedProject, itemTypeFilter, queueFilter, pagination.page, search, assigneeFilter, authorFilter, priorityFilter]);
+  }, [selectedProject, itemTypeFilter, queueFilter, page, search, assigneeFilter, authorFilter, priorityFilter]);
 
   // Load items + counts when project or filter changes
   useEffect(() => {
@@ -280,38 +273,27 @@ export default function Items() {
 
   function handleProjectChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const projectId = e.target.value;
-    setSelectedProject(projectId);
     storeSelectedProjectId(projectId);
-    setPagination((p) => ({ ...p, page: 1 }));
-    setItemTypeFilter('all');
-    setSearch('');
     setSearchInput('');
-    setAssigneeFilter('');
-    setAuthorFilter('');
-    setPriorityFilter('');
     setSearchParams(new URLSearchParams({ project: projectId }), { replace: true });
   }
 
   function handleQueueChange(queue: QueueId) {
     if (queue === queueFilter) return;
-
-    const next = new URLSearchParams(searchParams);
-    if (selectedProject) next.set('project', selectedProject);
-    if (queue === DEFAULT_QUEUE) next.delete('queue');
-    else next.set('queue', queue);
-    // The improvements queue is itself a type filter, so the type select goes away with it.
-    if (!getQueue(queue).statuses) {
-      setItemTypeFilter('all');
-      next.delete('type');
-    }
-    next.delete('page');
-    setPagination((p) => ({ ...p, page: 1 }));
-    setSearchParams(next, { replace: false });
+    applyFilter((params) => {
+      if (queue === DEFAULT_QUEUE) params.delete('queue');
+      else params.set('queue', queue);
+      // The improvements queue is itself a type filter, so the type select goes away with it.
+      if (!getQueue(queue).statuses) params.delete('type');
+    }, true);
   }
 
   function handleItemTypeFilter(e: React.ChangeEvent<HTMLSelectElement>) {
-    setItemTypeFilter(e.target.value);
-    setPagination((p) => ({ ...p, page: 1 }));
+    const type = e.target.value;
+    applyFilter((params) => {
+      if (type === 'all') params.delete('type');
+      else params.set('type', type);
+    });
   }
 
   function openCreateModal() {
@@ -349,31 +331,43 @@ export default function Items() {
     setSearchInput(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      setSearch(value);
-      setPagination((p) => ({ ...p, page: 1 }));
+      applyFilter((params) => {
+        if (value) params.set('q', value);
+        else params.delete('q');
+      });
     }, 300);
   }
 
   function clearSearch() {
     setSearchInput('');
-    setSearch('');
-    setPagination((p) => ({ ...p, page: 1 }));
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    applyFilter((params) => params.delete('q'));
+  }
+
+  function setParamFilter(key: string, value: string) {
+    applyFilter((params) => {
+      if (value) params.set(key, value);
+      else params.delete(key);
+    });
   }
 
   function handlePriorityFilter(e: React.ChangeEvent<HTMLSelectElement>) {
-    setPriorityFilter(e.target.value);
-    setPagination((p) => ({ ...p, page: 1 }));
+    setParamFilter('priority', e.target.value);
   }
 
   function handleAssigneeFilter(e: React.ChangeEvent<HTMLSelectElement>) {
-    setAssigneeFilter(e.target.value);
-    setPagination((p) => ({ ...p, page: 1 }));
+    setParamFilter('assignee', e.target.value);
   }
 
   function handleAuthorFilter(e: React.ChangeEvent<HTMLSelectElement>) {
-    setAuthorFilter(e.target.value);
-    setPagination((p) => ({ ...p, page: 1 }));
+    setParamFilter('author', e.target.value);
+  }
+
+  function handlePageChange(nextPage: number) {
+    const next = new URLSearchParams(searchParams);
+    if (nextPage > 1) next.set('page', String(nextPage));
+    else next.delete('page');
+    setSearchParams(next, { replace: false });
   }
 
   function itemPath(itemId: string) {
@@ -637,9 +631,9 @@ export default function Items() {
       </div>
 
       <Pagination
-        page={pagination.page}
-        totalPages={pagination.totalPages}
-        onPageChange={(p) => setPagination((prev) => ({ ...prev, page: p }))}
+        page={page}
+        totalPages={pageMeta.totalPages}
+        onPageChange={handlePageChange}
       />
 
       {showCreateModal && (
