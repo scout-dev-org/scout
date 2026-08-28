@@ -28,7 +28,7 @@ Scout is a self-hosted tracker for teams that want high-quality bug reports and 
 Tester clicks element  →  Widget creates bug with context + screenshot + recording
 Tester saves note     →  Widget stores page-level observation without workflow work
                                 ↓
-                        API creates item (new): bug / note / task
+                        API creates item (new): bug / note / task / improvement
                                 ↓
                         AI triage converts useful notes → tasks
                                 ↓
@@ -42,7 +42,7 @@ Tester saves note     →  Widget stores page-level observation without workflow
 | Area | Details |
 |------|---------|
 | **Widget** | Bug-first reporting, optional non-bug notes, Shadow DOM isolation, element picker with instruction banner, html2canvas-pro screenshot with element highlight, structured browser debug context (60s rolling buffer), rrweb session recording (60s buffer), cross-domain SSO |
-| **Dashboard** | React SPA, bug/note/task items, runtime error groups, manual creation, note-to-task triage, debug context viewer, rrweb session player with recording summary, items/projects/users/webhooks management, locale switcher |
+| **Dashboard** | React SPA, bug/note/task/improvement items, status queues plus a separate improvements queue for change requests, runtime error groups, manual creation, note-to-task triage, debug context viewer, rrweb session player with recording summary, items/projects/users/webhooks management, locale switcher |
 | **i18n** | Russian, English, Uzbek (Latin). Dashboard + widget. Server error codes translated on client |
 | **Agent workflows** | Manual agent skill for autonomous bug/task work, including AI triage that converts actionable notes into tasks, runtime error context handling, evidence-backed status updates, and safe non-production push/staging completion without background automation |
 | **Notifications** | Daily per-user email digest over SMTP: items waiting for that person to accept or rework, each linked back to Scout, plus counts for created items, status transitions, assignments, type changes, affected projects, and current statuses |
