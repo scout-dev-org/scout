@@ -101,6 +101,7 @@ const itemTypeLabels: Record<string, string> = {
   bug: 'Баг',
   note: 'Заметка',
   task: 'Задача',
+  improvement: 'Доработка',
 };
 
 const priorityLabels: Record<string, string> = {

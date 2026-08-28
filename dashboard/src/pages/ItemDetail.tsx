@@ -97,7 +97,7 @@ interface UserListItem {
 interface ItemData {
   id: string;
   projectId: string;
-  itemType: 'bug' | 'note' | 'task';
+  itemType: 'bug' | 'note' | 'task' | 'improvement';
   message: string;
   status: string;
   priority: string | null;
@@ -464,7 +464,7 @@ export default function ItemDetail() {
   // Edit mode state
   const [editing, setEditing] = useState(false);
   const [editRevision, setEditRevision] = useState('');
-  const [editItemType, setEditItemType] = useState<'bug' | 'note' | 'task'>('bug');
+  const [editItemType, setEditItemType] = useState<ItemData['itemType']>('bug');
   const [editMessage, setEditMessage] = useState('');
   const [editPriority, setEditPriority] = useState('medium');
   const [editLabels, setEditLabels] = useState('');
@@ -1039,12 +1039,13 @@ export default function ItemDetail() {
                     <span className="text-xs font-medium text-gray-500">{t('items.table.type')}</span>
                     <select
                       value={editItemType}
-                      onChange={(e) => setEditItemType(e.target.value as 'bug' | 'note' | 'task')}
+                      onChange={(e) => setEditItemType(e.target.value as ItemData['itemType'])}
                       className="rounded-md border border-gray-300 px-2 py-1 text-sm shadow-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500"
                     >
                       <option value="bug">{t('items.types.bug')}</option>
                       <option value="note">{t('items.types.note')}</option>
                       <option value="task">{t('items.types.task')}</option>
+                      <option value="improvement">{t('items.types.improvement')}</option>
                     </select>
                   </label>
                   <label className="flex items-center gap-2 text-sm text-gray-700">

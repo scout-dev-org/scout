@@ -49,6 +49,7 @@
   "items.types.bug": "Xatolik",
   "items.types.note": "Eslatma",
   "items.types.task": "Topshiriq",
+  "items.types.improvement": "Yaxshilash",
   "items.statuses.new": "Yangi",
   "items.statuses.in_progress": "Jarayonda",
   "items.statuses.review": "Ko'rib chiqish kerak",
@@ -62,6 +63,7 @@
   "items.queues.needs_acceptance": "Qabul kutilmoqda",
   "items.queues.accepted": "Qabul qilindi",
   "items.queues.archived": "Arxiv",
+  "items.queues.improvements": "Yaxshilashlar",
   "items.priorities.all": "Barcha ustuvorliklar",
   "items.priorities.critical": "Kritik",
   "items.priorities.high": "Yuqori",
@@ -86,6 +88,7 @@
   "items.form.placeholders.bug": "Nima buzilgan va uni qanday ko'rish mumkin?",
   "items.form.placeholders.note": "Saqlab qo'yish kerak bo'lgan fikr, kuzatuv yoki savol",
   "items.form.placeholders.task": "Nima qilish kerak va qanday natija kutiladi?",
+  "items.form.placeholders.improvement": "Mahsulot va'da qilganidan tashqari yana nima qilishi kerak?",
 
   "items.detail.back": "Orqaga",
   "items.detail.deleteConfirm": "Xatolikni o'chirish? Bu amalni ortga qaytarib bo'lmaydi.",

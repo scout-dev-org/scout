@@ -49,6 +49,7 @@
   "items.types.bug": "Баг",
   "items.types.note": "Заметка",
   "items.types.task": "Задача",
+  "items.types.improvement": "Доработка",
   "items.statuses.new": "Новые",
   "items.statuses.in_progress": "В работе",
   "items.statuses.review": "Нужна проверка",
@@ -62,6 +63,7 @@
   "items.queues.needs_acceptance": "На принятии",
   "items.queues.accepted": "Принято",
   "items.queues.archived": "Архив",
+  "items.queues.improvements": "Доработки",
   "items.priorities.all": "Все приоритеты",
   "items.priorities.critical": "Критический",
   "items.priorities.high": "Высокий",
@@ -86,6 +88,7 @@
   "items.form.placeholders.bug": "Что сломано и как это увидеть?",
   "items.form.placeholders.note": "Мысль, наблюдение или вопрос, который важно не потерять",
   "items.form.placeholders.task": "Что нужно сделать и какой результат ожидается?",
+  "items.form.placeholders.improvement": "Что продукт должен начать делать сверх того, что уже обещает?",
 
   "items.detail.back": "Назад",
   "items.detail.deleteConfirm": "Удалить баг? Это действие нельзя отменить.",

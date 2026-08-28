@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ITEM_STATUSES, WEBHOOK_EVENT_TYPES } from '../db/schema.js';
+import { ITEM_STATUSES, ITEM_TYPES, WEBHOOK_EVENT_TYPES } from '../db/schema.js';
 import {
   DONE_EVIDENCE_LEVELS,
   ITEM_EVIDENCE_COVERAGES,
@@ -141,7 +141,7 @@ export const listUsersSchema = paginationSchema.extend({
 });
 
 // === Items ===
-const itemTypeSchema = z.enum(['bug', 'note', 'task']);
+const itemTypeSchema = z.enum(ITEM_TYPES);
 const itemStatusSchema = z.enum(ITEM_STATUSES);
 const updateItemStatusTargetSchema = z.enum(UPDATE_ITEM_STATUS_TARGETS);
 
@@ -172,6 +172,7 @@ export const listItemsSchema = z.object({
   perPage: z.number().int().min(1).max(100).optional(),
   projectId: uuidSchema,
   itemType: itemTypeSchema.optional(),
+  itemTypes: z.array(itemTypeSchema).min(1).max(ITEM_TYPES.length).optional(),
   status: itemStatusSchema.optional(),
   statuses: z.array(itemStatusSchema).min(1).max(ITEM_STATUSES.length).optional(),
   priority: z.enum(['critical', 'high', 'medium', 'low']).optional(),
@@ -185,6 +186,7 @@ export const getItemSchema = z.object({ id: uuidSchema });
 export const countItemsSchema = z.object({
   projectId: uuidSchema,
   itemType: itemTypeSchema.optional(),
+  itemTypes: z.array(itemTypeSchema).min(1).max(ITEM_TYPES.length).optional(),
 });
 
 const itemRevisionSchema = z.string().min(1).max(64);

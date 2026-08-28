@@ -49,6 +49,7 @@
   "items.types.bug": "Bug",
   "items.types.note": "Note",
   "items.types.task": "Task",
+  "items.types.improvement": "Improvement",
   "items.statuses.new": "New",
   "items.statuses.in_progress": "In progress",
   "items.statuses.review": "Needs review",
@@ -62,6 +63,7 @@
   "items.queues.needs_acceptance": "Needs Acceptance",
   "items.queues.accepted": "Accepted",
   "items.queues.archived": "Archived",
+  "items.queues.improvements": "Improvements",
   "items.priorities.all": "All priorities",
   "items.priorities.critical": "Critical",
   "items.priorities.high": "High",
@@ -86,6 +88,7 @@
   "items.form.placeholders.bug": "What is broken and how can it be seen?",
   "items.form.placeholders.note": "A thought, observation, or question worth saving",
   "items.form.placeholders.task": "What needs to be done and what result is expected?",
+  "items.form.placeholders.improvement": "What should the product start doing beyond what it already promises?",
 
   "items.detail.back": "Back",
   "items.detail.deleteConfirm": "Delete this bug? This action cannot be undone.",

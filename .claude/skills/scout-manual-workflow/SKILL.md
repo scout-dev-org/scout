@@ -36,7 +36,7 @@ Prioritize by user harm, data or security risk, blocked core journeys, regressio
 
 ## Note triage
 
-A note is captured signal, not committed work. Convert it into a task only when the desired outcome, affected surface and acceptance path are clear from product and repository context. Otherwise leave one focused question naming the missing decision, or cancel it with a recorded reason when it is duplicate, obsolete or out of scope. Never guess product requirements through code changes to clear a note.
+A note is captured signal, not committed work. Convert it into a task only when the desired outcome, affected surface and acceptance path are clear from product and repository context. Otherwise leave one focused question naming the missing decision, re-type it to improvement when it asks the product to promise something new instead of reporting a broken promise, or cancel it with a recorded reason when it is duplicate or obsolete. Never guess product requirements through code changes to clear a note.
 
 Link related items only on current evidence; similar wording is a lead, not proof. Cluster items only on a shared root cause, and still verify each one against its own reported condition.
 

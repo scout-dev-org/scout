@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { ITEM_STATUSES } from '../db/schema.js';
+import { ITEM_STATUSES, ITEM_TYPES } from '../db/schema.js';
 import {
   DONE_EVIDENCE_LEVELS,
   ITEM_EVIDENCE_COVERAGES,
@@ -96,7 +96,8 @@ const spec = {
       },
       ItemType: {
         type: 'string',
-        enum: ['bug', 'note', 'task'],
+        enum: [...ITEM_TYPES],
+        description: 'bug: the product does not do what it already promises. task: committed work. note: captured signal, no committed work. improvement: a request for the product to promise something new - kept out of the bug backlog and shown in its own dashboard queue.',
       },
       ItemSource: {
         type: 'string',
@@ -723,6 +724,7 @@ const spec = {
                 properties: {
                   projectId: { type: 'string', format: 'uuid' },
                   itemType: { $ref: '#/components/schemas/ItemType' },
+                  itemTypes: { type: 'array', items: { $ref: '#/components/schemas/ItemType' }, minItems: 1, maxItems: ITEM_TYPES.length, description: 'Filter by multiple types, useful for a backlog that excludes improvement. If itemType is provided, itemType takes precedence.' },
                   status: { $ref: '#/components/schemas/ItemStatus' },
                   statuses: { type: 'array', items: { $ref: '#/components/schemas/ItemStatus' }, minItems: 1, maxItems: ITEM_STATUSES.length, description: 'Filter by multiple statuses, useful for human queue groups such as Needs Review = review + changes_requested. If status is provided, status takes precedence.' },
                   priority: { $ref: '#/components/schemas/ItemPriority' },
@@ -822,6 +824,7 @@ const spec = {
                 properties: {
                   projectId: { type: 'string', format: 'uuid' },
                   itemType: { $ref: '#/components/schemas/ItemType' },
+                  itemTypes: { type: 'array', items: { $ref: '#/components/schemas/ItemType' }, minItems: 1, maxItems: ITEM_TYPES.length, description: 'Count only these types. If itemType is provided, itemType takes precedence.' },
                 },
               },
             },

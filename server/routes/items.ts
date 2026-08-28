@@ -173,7 +173,7 @@ export const itemRoutes = new Hono()
   .post('/list',
     zValidator('json', listItemsSchema),
     async (c) => {
-      const { projectId, itemType, status, statuses, priority, assigneeId, reporterId, search, page, perPage } = c.req.valid('json');
+      const { projectId, itemType, itemTypes, status, statuses, priority, assigneeId, reporterId, search, page, perPage } = c.req.valid('json');
       const user = c.get('user');
       const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
       if (!project) throw new NotFoundError('Project', 'PROJECT_NOT_FOUND');
@@ -186,6 +186,7 @@ export const itemRoutes = new Hono()
 
       const conditions = [eq(scoutItems.projectId, projectId)];
       if (itemType) conditions.push(eq(scoutItems.itemType, itemType));
+      else if (itemTypes) conditions.push(inArray(scoutItems.itemType, itemTypes));
       if (status) conditions.push(eq(scoutItems.status, status));
       else if (statuses) conditions.push(inArray(scoutItems.status, statuses));
       if (priority) conditions.push(eq(scoutItems.priority, priority));
@@ -256,7 +257,7 @@ export const itemRoutes = new Hono()
   .post('/count',
     zValidator('json', countItemsSchema),
     async (c) => {
-      const { projectId, itemType } = c.req.valid('json');
+      const { projectId, itemType, itemTypes } = c.req.valid('json');
       const user = c.get('user');
       const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
       if (!project) throw new NotFoundError('Project', 'PROJECT_NOT_FOUND');
@@ -266,13 +267,16 @@ export const itemRoutes = new Hono()
         throw new ForbiddenError('Нет доступа к этому проекту', 'NO_PROJECT_ACCESS');
       }
       const counts: Record<string, number> = {};
+      const typeCondition = itemType
+        ? [eq(scoutItems.itemType, itemType)]
+        : itemTypes ? [inArray(scoutItems.itemType, itemTypes)] : [];
 
       for (const status of ITEM_STATUSES) {
         const [{ total }] = db.select({ total: count() }).from(scoutItems)
           .where(and(
             eq(scoutItems.projectId, projectId),
             eq(scoutItems.status, status),
-            ...(itemType ? [eq(scoutItems.itemType, itemType)] : []),
+            ...typeCondition,
           ))
           .all();
         counts[status] = total;

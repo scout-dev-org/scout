@@ -48,12 +48,13 @@ export const pivotUsersProjects = sqliteTable('pivot_users_projects', {
 ]);
 
 export const ITEM_STATUSES = ['new', 'in_progress', 'review', 'done', 'changes_requested', 'verified', 'cancelled'] as const;
+export const ITEM_TYPES = ['bug', 'note', 'task', 'improvement'] as const;
 
 // === Scout Items ===
 export const scoutItems = sqliteTable('scout_items', {
   id: text('id').primaryKey(),
   projectId: text('project_id').notNull().references(() => projects.id),
-  itemType: text('item_type', { enum: ['bug', 'note', 'task'] }).notNull().default('bug'),
+  itemType: text('item_type', { enum: ITEM_TYPES }).notNull().default('bug'),
   source: text('source', { enum: ['widget', 'dashboard', 'api', 'agent'] }).notNull().default('widget'),
   message: text('message').notNull(),
   status: text('status', {

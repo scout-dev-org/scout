@@ -10,6 +10,7 @@ import {
 } from '../lib/project-selection';
 import { useSSE } from '../hooks/useSSE';
 import { useProjectOpenCounts } from '../hooks/useProjectOpenCounts';
+import { BACKLOG_ITEM_TYPES, IMPROVEMENT_ITEM_TYPE } from '../lib/item-types';
 import { useTranslation } from '../i18n';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
@@ -58,18 +59,20 @@ interface Counts {
 }
 
 type StatusKey = keyof Counts;
-type QueueId = 'open' | 'in_progress' | 'needs_review' | 'needs_acceptance' | 'accepted' | 'archived';
+type QueueId = 'open' | 'in_progress' | 'needs_review' | 'needs_acceptance' | 'accepted' | 'archived' | 'improvements';
 
 const DEFAULT_QUEUE: QueueId = 'open';
-const QUEUES: Array<{ id: QueueId; labelKey: string; statuses: StatusKey[] }> = [
+// `statuses: null` marks the type queue: every improvement, whatever its status.
+const QUEUES: Array<{ id: QueueId; labelKey: string; statuses: StatusKey[] | null }> = [
   { id: 'open', labelKey: 'items.queues.open', statuses: ['new'] },
   { id: 'in_progress', labelKey: 'items.queues.in_progress', statuses: ['in_progress'] },
   { id: 'needs_review', labelKey: 'items.queues.needs_review', statuses: ['review', 'changes_requested'] },
   { id: 'needs_acceptance', labelKey: 'items.queues.needs_acceptance', statuses: ['done'] },
   { id: 'accepted', labelKey: 'items.queues.accepted', statuses: ['verified'] },
   { id: 'archived', labelKey: 'items.queues.archived', statuses: ['cancelled'] },
+  { id: 'improvements', labelKey: 'items.queues.improvements', statuses: null },
 ];
-const ITEM_TYPES = ['all', 'bug', 'note', 'task'] as const;
+const ITEM_TYPES = ['all', ...BACKLOG_ITEM_TYPES] as const;
 
 const ITEM_TYPE_KEYS: Record<string, string> = {
   all: 'items.types.all',
@@ -79,6 +82,8 @@ const ITEM_TYPE_KEYS: Record<string, string> = {
 };
 
 const PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
+
+type CreateItemType = 'bug' | 'note' | 'task' | 'improvement';
 
 function createDedupeKey(): string {
   const cryptoApi = globalThis.crypto;
@@ -144,9 +149,10 @@ export default function Items() {
     verified: 0,
     cancelled: 0,
   });
+  const [improvementCount, setImprovementCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createType, setCreateType] = useState<'bug' | 'note' | 'task'>('task');
+  const [createType, setCreateType] = useState<CreateItemType>('task');
   const [createMessage, setCreateMessage] = useState('');
   const [createPriority, setCreatePriority] = useState('medium');
   const [createSaving, setCreateSaving] = useState(false);
@@ -219,10 +225,14 @@ export default function Items() {
       page: pagination.page,
       perPage: 20,
     };
-    if (itemTypeFilter !== 'all') {
-      body.itemType = itemTypeFilter;
+    const queueStatuses = getQueue(queueFilter).statuses;
+    if (queueStatuses) {
+      body.statuses = queueStatuses;
+      if (itemTypeFilter !== 'all') body.itemType = itemTypeFilter;
+      else body.itemTypes = BACKLOG_ITEM_TYPES;
+    } else {
+      body.itemType = IMPROVEMENT_ITEM_TYPE;
     }
-    body.statuses = getQueue(queueFilter).statuses;
     if (search) {
       body.search = search;
     }
@@ -240,13 +250,18 @@ export default function Items() {
       api<{ items: Item[]; pagination: PaginationData }>('/api/items/list', body),
       api<{ counts: Counts }>('/api/items/count', {
         projectId: selectedProject,
-        ...(itemTypeFilter !== 'all' ? { itemType: itemTypeFilter } : {}),
+        ...(itemTypeFilter !== 'all' ? { itemType: itemTypeFilter } : { itemTypes: BACKLOG_ITEM_TYPES }),
+      }),
+      api<{ counts: Counts }>('/api/items/count', {
+        projectId: selectedProject,
+        itemType: IMPROVEMENT_ITEM_TYPE,
       }),
     ])
-      .then(([listRes, countRes]) => {
+      .then(([listRes, countRes, improvementRes]) => {
         setItems(listRes.items);
         setPagination(listRes.pagination);
         setCounts(countRes.counts);
+        setImprovementCount(Object.values(improvementRes.counts).reduce((sum, value) => sum + value, 0));
       })
       .catch(() => {})
       .finally(() => { if (showLoading) setLoading(false); });
@@ -286,6 +301,11 @@ export default function Items() {
     if (selectedProject) next.set('project', selectedProject);
     if (queue === DEFAULT_QUEUE) next.delete('queue');
     else next.set('queue', queue);
+    // The improvements queue is itself a type filter, so the type select goes away with it.
+    if (!getQueue(queue).statuses) {
+      setItemTypeFilter('all');
+      next.delete('type');
+    }
     next.delete('page');
     setPagination((p) => ({ ...p, page: 1 }));
     setSearchParams(next, { replace: false });
@@ -365,7 +385,10 @@ export default function Items() {
   const canCreateSelectedItem = selectedProject ? canCreateItems(selectedProject) : false;
 
   function getTabCount(queue: QueueId): number | null {
-    const value = getQueue(queue).statuses.reduce((sum, status) => sum + counts[status], 0);
+    const statuses = getQueue(queue).statuses;
+    const value = statuses
+      ? statuses.reduce((sum, status) => sum + counts[status], 0)
+      : improvementCount;
     return value > 0 ? value : null;
   }
 
@@ -423,16 +446,18 @@ export default function Items() {
             </button>
           )}
         </div>
-        <select
-          name="items-type"
-          value={itemTypeFilter}
-          onChange={handleItemTypeFilter}
-          className={`w-full md:w-40 ${FORM_CONTROL_CLASS}`}
-        >
-          {ITEM_TYPES.map((type) => (
-            <option key={type} value={type}>{t(ITEM_TYPE_KEYS[type]!)}</option>
-          ))}
-        </select>
+        {getQueue(queueFilter).statuses && (
+          <select
+            name="items-type"
+            value={itemTypeFilter}
+            onChange={handleItemTypeFilter}
+            className={`w-full md:w-40 ${FORM_CONTROL_CLASS}`}
+          >
+            {ITEM_TYPES.map((type) => (
+              <option key={type} value={type}>{t(ITEM_TYPE_KEYS[type]!)}</option>
+            ))}
+          </select>
+        )}
         <select
           name="items-priority"
           value={priorityFilter}
@@ -631,12 +656,13 @@ export default function Items() {
               <span className="text-sm font-medium text-gray-700">{t('items.form.type')}</span>
               <select
                 value={createType}
-                onChange={(e) => setCreateType(e.target.value as 'bug' | 'note' | 'task')}
+                onChange={(e) => setCreateType(e.target.value as CreateItemType)}
                 className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500"
               >
                 <option value="task">{t('items.types.task')}</option>
                 <option value="note">{t('items.types.note')}</option>
                 <option value="bug">{t('items.types.bug')}</option>
+                <option value="improvement">{t('items.types.improvement')}</option>
               </select>
             </label>
             <label className="mt-3 block">
