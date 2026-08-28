@@ -5,6 +5,7 @@ import '@fancyapps/ui/dist/fancybox/fancybox.css';
 import { api, ApiError } from '../lib/api';
 import { formatDate } from '../lib/date';
 import { isAdmin, storageUrl } from '../lib/auth';
+import type { ItemType } from '../lib/item-types';
 import { useSSE, type SSEEventType } from '../hooks/useSSE';
 import { useTranslation, type Locale } from '../i18n';
 import StatusBadge from '../components/StatusBadge';
@@ -97,7 +98,7 @@ interface UserListItem {
 interface ItemData {
   id: string;
   projectId: string;
-  itemType: 'bug' | 'note' | 'task' | 'improvement';
+  itemType: ItemType;
   message: string;
   status: string;
   priority: string | null;

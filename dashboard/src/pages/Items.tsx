@@ -10,7 +10,7 @@ import {
 } from '../lib/project-selection';
 import { useSSE } from '../hooks/useSSE';
 import { useProjectOpenCounts } from '../hooks/useProjectOpenCounts';
-import { BACKLOG_ITEM_TYPES, IMPROVEMENT_ITEM_TYPE } from '../lib/item-types';
+import { BACKLOG_ITEM_TYPES, IMPROVEMENT_ITEM_TYPE, type ItemType } from '../lib/item-types';
 import { useTranslation } from '../i18n';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
@@ -83,8 +83,6 @@ const ITEM_TYPE_KEYS: Record<string, string> = {
 
 const PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
 
-type CreateItemType = 'bug' | 'note' | 'task' | 'improvement';
-
 function createDedupeKey(): string {
   const cryptoApi = globalThis.crypto;
   if (cryptoApi?.randomUUID) return cryptoApi.randomUUID();
@@ -152,7 +150,7 @@ export default function Items() {
   const [improvementCount, setImprovementCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createType, setCreateType] = useState<CreateItemType>('task');
+  const [createType, setCreateType] = useState<ItemType>('task');
   const [createMessage, setCreateMessage] = useState('');
   const [createPriority, setCreatePriority] = useState('medium');
   const [createSaving, setCreateSaving] = useState(false);
@@ -656,7 +654,7 @@ export default function Items() {
               <span className="text-sm font-medium text-gray-700">{t('items.form.type')}</span>
               <select
                 value={createType}
-                onChange={(e) => setCreateType(e.target.value as CreateItemType)}
+                onChange={(e) => setCreateType(e.target.value as ItemType)}
                 className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500"
               >
                 <option value="task">{t('items.types.task')}</option>
