@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { compress } from 'hono/compress';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -29,6 +30,10 @@ const app = new Hono();
 
 // Security headers on ALL responses
 app.use('*', securityHeaders);
+
+// The widget and the dashboard are text, and they were going out raw: the widget alone cost every
+// visitor of every host page half a megabyte on the wire.
+app.use('*', compress());
 
 // Structured request logging via pino
 app.use('*', async (c, next) => {
@@ -335,6 +340,18 @@ document.getElementById('p').addEventListener('keydown',function(e){if(e.key==='
 });
 
 // Widget JS (built by Vite)
+// Host pages embed the widget under a stable name, so it cannot be cached forever; an hour of
+// freshness is enough to stop the re-download on every page view, and a stale copy keeps working
+// while the new one is fetched in the background.
+app.use('/widget/*', async (c, next) => {
+  await next();
+  if (!c.res.ok) return;
+  c.res.headers.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+  // The screenshot and recorder pieces are pulled in with a dynamic import rather than a script tag,
+  // and a module read across origins needs this even though a plain <script src> of the same file
+  // never did. No credentials travel with them.
+  c.res.headers.set('Access-Control-Allow-Origin', '*');
+});
 app.use('/widget/*', serveStatic({
   root: './',
   rewriteRequestPath: (path) => path.replace('/widget/', '/widget/dist/'),

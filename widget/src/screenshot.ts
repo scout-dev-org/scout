@@ -1,4 +1,4 @@
-import html2canvas from 'html2canvas-pro';
+import { loadScreenshotVendor } from './vendor/load';
 
 /**
  * Screenshot capture using html2canvas-pro.
@@ -86,6 +86,17 @@ function restoreIframes(replaced: ReplacedIframe[]): void {
 export async function captureScreenshot(highlightSelector?: string): Promise<string | null> {
   let highlightOverlay: HTMLDivElement | null = null;
   let replacedIframes: ReplacedIframe[] = [];
+
+  // Fetch the library before touching the page: the cross-origin iframes below are swapped for
+  // placeholders, and waiting on a download with those in place would show the reporter a broken
+  // page for as long as it takes.
+  let html2canvas: Awaited<ReturnType<typeof loadScreenshotVendor>>['html2canvas'];
+  try {
+    ({ html2canvas } = await loadScreenshotVendor());
+  } catch (err) {
+    console.warn('[Scout] Screenshot library failed to load:', err);
+    return null;
+  }
 
   // Add element highlight overlay
   if (highlightSelector) {

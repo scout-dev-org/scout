@@ -14,8 +14,7 @@
  */
 
 import type { eventWithTime, recordOptions } from 'rrweb';
-import { record } from 'rrweb';
-import { gzipSync } from 'fflate';
+import { loadRecorderVendor } from './vendor/load';
 import type { RecordingSummary } from './debug-context';
 
 // --- Constants ---
@@ -43,6 +42,9 @@ const THROTTLE_WINDOW_MS = 5_000;
 
 let events: eventWithTime[] = [];
 let stopFn: (() => void) | null = null;
+/** rrweb and gzip arrive over the network, so everything that needs them checks that they did. */
+let vendor: Awaited<ReturnType<typeof loadRecorderVendor>> | null = null;
+let starting = false;
 let paused = false;
 let recordingFailed = false;
 let estimatedBufferSize = 0;
@@ -205,8 +207,18 @@ function fitServerLimit(base64: string): string | null {
 
 // --- Public API ---
 
-export function startRecording(): void {
-  if (stopFn) return;
+export async function startRecording(): Promise<void> {
+  if (stopFn || starting) return;
+  starting = true;
+
+  try {
+    vendor = await loadRecorderVendor();
+  } catch (err) {
+    console.warn('[Scout] Session recording library failed to load:', err);
+    recordingFailed = true;
+    starting = false;
+    return;
+  }
 
   applyRrwebPatches();
 
@@ -284,7 +296,7 @@ export function startRecording(): void {
       },
     };
 
-    stopFn = record(opts) ?? null;
+    stopFn = vendor.record(opts) ?? null;
 
     if (!stopFn) {
       console.warn('[Scout] rrweb record() returned null — recording disabled');
@@ -294,6 +306,8 @@ export function startRecording(): void {
     console.warn('[Scout] Session recording failed to start:', err);
     recordingFailed = true;
     stopFn = null;
+  } finally {
+    starting = false;
   }
 }
 
@@ -331,7 +345,8 @@ export function getRecordingCompressed(): string | null {
     const encoded = new TextEncoder().encode(json);
 
     // Compress with fflate gzip.
-    const compressed = gzipSync(encoded, { level: 6 });
+    if (!vendor) return null;
+    const compressed = vendor.gzipSync(encoded, { level: 6 });
 
     return fitServerLimit(bytesToBase64(compressed));
   } catch (err) {

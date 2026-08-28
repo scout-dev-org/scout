@@ -1,5 +1,6 @@
 import { WIDGET_STYLES } from './styles';
-import { ensureToken, login, initSSO, tryPopupSSO } from './auth';
+import { ensureToken, getToken, login, initSSO, tryPopupSSO } from './auth';
+import { setVendorBase } from './vendor/load';
 import { createFab, showFab, hideFab } from './fab';
 import { pickElement, type PickedElement } from './element-picker';
 import { createPanel, showPanel, hidePanel, attachPanelEvents, type PanelCallbacks } from './panel';
@@ -54,6 +55,9 @@ async function init(): Promise<void> {
 
   const { apiUrl, projectSlug } = config;
 
+  // The recorder and the screenshot library are fetched from the same place this script came from.
+  setVendorBase(apiUrl);
+
   // --- Cross-domain SSO: fetch token from the configured Scout API via iframe ---
   await initSSO(apiUrl);
 
@@ -80,7 +84,10 @@ async function init(): Promise<void> {
   shadow.appendChild(styleEl);
 
   // --- Start rrweb recorder ---
-  startRecording();
+  // Only for a visitor who already holds a Scout session. The recording exists to show what happened
+  // before a report, and a report cannot be filed without signing in; downloading the recorder for
+  // everyone else spent a fifth of a megabyte on a buffer nobody would ever submit.
+  if (getToken()) void startRecording();
   startDebugContextCapture({ scoutRootId: 'scout-widget-root', apiUrl });
 
   // --- Create overlay for element picker ---

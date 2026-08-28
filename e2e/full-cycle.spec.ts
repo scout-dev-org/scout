@@ -452,13 +452,25 @@ test.describe('Full bug lifecycle', () => {
 
   // --- Widget endpoint ---
 
-  test('17. Widget: JS bundle is served', async () => {
+  test('17. Widget: the core is served, compressed, and stays small', async () => {
     const res = await fetch(`${API}/widget/scout-widget.js`);
     expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toContain('max-age');
     const js = await res.text();
     expect(js).toContain('scout-widget-root');
     expect(js).toContain('__SCOUT_CONFIG__');
-    expect(js.length).toBeGreaterThan(100_000); // ~438KB
+    // Every visitor of every host page pays for this file. The recorder and the screenshot library
+    // live in their own modules; if either is inlined again this budget is what notices.
+    expect(js.length).toBeLessThan(120_000);
+  });
+
+  test('17b. Widget: the heavy pieces are served as their own modules', async () => {
+    for (const name of ['scout-recorder.js', 'scout-screenshot.js']) {
+      const res = await fetch(`${API}/widget/${name}`);
+      expect(res.status).toBe(200);
+      // They are pulled in with a dynamic import from a host page on another origin.
+      expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    }
   });
 
   test('18. Dashboard: SPA routing works for client routes', async ({ page }) => {
