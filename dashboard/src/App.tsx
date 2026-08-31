@@ -34,6 +34,7 @@ export default function App() {
           >
             <Route index element={<Navigate to="/items" replace />} />
             <Route path="items" element={<Items />} />
+            <Route path="improvements" element={<Items scope="improvements" />} />
             <Route path="items/:id" element={<ItemDetail />} />
             <Route path="errors" element={<ErrorGroups />} />
             <Route path="projects" element={<Projects />} />

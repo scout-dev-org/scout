@@ -10,7 +10,7 @@ import {
 } from '../lib/project-selection';
 import { useSSE } from '../hooks/useSSE';
 import { useProjectOpenCounts } from '../hooks/useProjectOpenCounts';
-import { BACKLOG_ITEM_TYPES, IMPROVEMENT_ITEM_TYPE, type ItemType } from '../lib/item-types';
+import { BACKLOG_ITEM_TYPES, IMPROVEMENT_ITEM_TYPE, SCOPE_ITEM_TYPES, type ItemScope, type ItemType } from '../lib/item-types';
 import { useTranslation } from '../i18n';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
@@ -59,10 +59,10 @@ interface Counts {
 }
 
 type StatusKey = keyof Counts;
-type QueueId = 'open' | 'in_progress' | 'needs_review' | 'needs_acceptance' | 'accepted' | 'archived' | 'improvements';
+type QueueId = 'open' | 'in_progress' | 'needs_review' | 'needs_acceptance' | 'accepted' | 'archived' | 'all';
 
 const DEFAULT_QUEUE: QueueId = 'open';
-// `statuses: null` marks the type queue: every improvement, whatever its status.
+// `statuses: null` marks the history queue: every status the section holds.
 const QUEUES: Array<{ id: QueueId; labelKey: string; statuses: StatusKey[] | null }> = [
   { id: 'open', labelKey: 'items.queues.open', statuses: ['new'] },
   { id: 'in_progress', labelKey: 'items.queues.in_progress', statuses: ['in_progress'] },
@@ -70,7 +70,7 @@ const QUEUES: Array<{ id: QueueId; labelKey: string; statuses: StatusKey[] | nul
   { id: 'needs_acceptance', labelKey: 'items.queues.needs_acceptance', statuses: ['done'] },
   { id: 'accepted', labelKey: 'items.queues.accepted', statuses: ['verified'] },
   { id: 'archived', labelKey: 'items.queues.archived', statuses: ['cancelled'] },
-  { id: 'improvements', labelKey: 'items.queues.improvements', statuses: null },
+  { id: 'all', labelKey: 'items.queues.all', statuses: null },
 ];
 const ITEM_TYPES = ['all', ...BACKLOG_ITEM_TYPES] as const;
 
@@ -121,7 +121,9 @@ function getInitialPage(params: URLSearchParams) {
   return Number.isInteger(page) && page > 0 ? page : 1;
 }
 
-export default function Items() {
+export default function Items({ scope = 'backlog' }: { scope?: ItemScope }) {
+  const isImprovements = scope === 'improvements';
+  const scopeTypes = SCOPE_ITEM_TYPES[scope];
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const admin = isAdmin();
@@ -133,7 +135,7 @@ export default function Items() {
   // so a navigation started by one control can never be overwritten by another one's state.
   const selectedProject = searchParams.get('project') ?? '';
   const queueFilter = getInitialQueue(searchParams);
-  const itemTypeFilter = getInitialItemType(searchParams);
+  const itemTypeFilter = isImprovements ? 'all' : getInitialItemType(searchParams);
   const priorityFilter = getInitialPriority(searchParams);
   const assigneeFilter = searchParams.get('assignee') ?? '';
   const authorFilter = searchParams.get('author') ?? '';
@@ -154,7 +156,6 @@ export default function Items() {
     verified: 0,
     cancelled: 0,
   });
-  const [improvementCount, setImprovementCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createType, setCreateType] = useState<ItemType>('task');
@@ -176,7 +177,7 @@ export default function Items() {
     setSearchParams(next, { replace: !push });
   }, [searchParams, selectedProject, setSearchParams]);
 
-  const { openCounts, reload: reloadOpenCounts } = useProjectOpenCounts(projects.map((p) => p.id));
+  const { openCounts, reload: reloadOpenCounts } = useProjectOpenCounts(projects.map((p) => p.id), scopeTypes);
 
   // Load projects
   useEffect(() => {
@@ -217,13 +218,9 @@ export default function Items() {
       perPage: 20,
     };
     const queueStatuses = getQueue(queueFilter).statuses;
-    if (queueStatuses) {
-      body.statuses = queueStatuses;
-      if (itemTypeFilter !== 'all') body.itemType = itemTypeFilter;
-      else body.itemTypes = BACKLOG_ITEM_TYPES;
-    } else {
-      body.itemType = IMPROVEMENT_ITEM_TYPE;
-    }
+    if (queueStatuses) body.statuses = queueStatuses;
+    if (itemTypeFilter !== 'all') body.itemType = itemTypeFilter;
+    else body.itemTypes = scopeTypes;
     if (search) {
       body.search = search;
     }
@@ -241,22 +238,17 @@ export default function Items() {
       api<{ items: Item[]; pagination: PaginationData }>('/api/items/list', body),
       api<{ counts: Counts }>('/api/items/count', {
         projectId: selectedProject,
-        ...(itemTypeFilter !== 'all' ? { itemType: itemTypeFilter } : { itemTypes: BACKLOG_ITEM_TYPES }),
-      }),
-      api<{ counts: Counts }>('/api/items/count', {
-        projectId: selectedProject,
-        itemType: IMPROVEMENT_ITEM_TYPE,
+        ...(itemTypeFilter !== 'all' ? { itemType: itemTypeFilter } : { itemTypes: scopeTypes }),
       }),
     ])
-      .then(([listRes, countRes, improvementRes]) => {
+      .then(([listRes, countRes]) => {
         setItems(listRes.items);
         setPageMeta(listRes.pagination);
         setCounts(countRes.counts);
-        setImprovementCount(Object.values(improvementRes.counts).reduce((sum, value) => sum + value, 0));
       })
       .catch(() => {})
       .finally(() => { if (showLoading) setLoading(false); });
-  }, [selectedProject, itemTypeFilter, queueFilter, page, search, assigneeFilter, authorFilter, priorityFilter]);
+  }, [selectedProject, scopeTypes, itemTypeFilter, queueFilter, page, search, assigneeFilter, authorFilter, priorityFilter]);
 
   // Load items + counts when project or filter changes
   useEffect(() => {
@@ -283,8 +275,6 @@ export default function Items() {
     applyFilter((params) => {
       if (queue === DEFAULT_QUEUE) params.delete('queue');
       else params.set('queue', queue);
-      // The improvements queue is itself a type filter, so the type select goes away with it.
-      if (!getQueue(queue).statuses) params.delete('type');
     }, true);
   }
 
@@ -297,7 +287,7 @@ export default function Items() {
   }
 
   function openCreateModal() {
-    setCreateType('task');
+    setCreateType(isImprovements ? IMPROVEMENT_ITEM_TYPE : 'task');
     setCreateMessage('');
     setCreatePriority('medium');
     setCreateError('');
@@ -380,7 +370,7 @@ export default function Items() {
     const statuses = getQueue(queue).statuses;
     const value = statuses
       ? statuses.reduce((sum, status) => sum + counts[status], 0)
-      : improvementCount;
+      : Object.values(counts).reduce((sum, count) => sum + count, 0);
     return value > 0 ? value : null;
   }
 
@@ -388,8 +378,8 @@ export default function Items() {
     <div className="p-4 md:p-6">
       <div className="mb-4 md:mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">{t('items.title')}</h1>
-          <p className="mt-1 text-sm text-gray-500">{t('items.description')}</p>
+          <h1 className="text-xl font-bold text-gray-900">{t(isImprovements ? 'improvements.title' : 'items.title')}</h1>
+          <p className="mt-1 text-sm text-gray-500">{t(isImprovements ? 'improvements.description' : 'items.description')}</p>
         </div>
         <div className="flex flex-col gap-2 md:flex-row md:items-center">
           <button
@@ -438,7 +428,7 @@ export default function Items() {
             </button>
           )}
         </div>
-        {getQueue(queueFilter).statuses && (
+        {!isImprovements && (
           <select
             name="items-type"
             value={itemTypeFilter}
@@ -643,20 +633,23 @@ export default function Items() {
             className="w-full rounded-t-xl border border-gray-200 bg-white p-5 shadow-xl md:max-w-lg md:rounded-lg md:p-6"
           >
             <h2 className="text-lg font-semibold text-gray-900">{t('items.create')}</h2>
-            <p className="mt-1 text-sm text-gray-500">{t('items.createDescription')}</p>
-            <label className="mt-4 block">
-              <span className="text-sm font-medium text-gray-700">{t('items.form.type')}</span>
-              <select
-                value={createType}
-                onChange={(e) => setCreateType(e.target.value as ItemType)}
-                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500"
-              >
-                <option value="task">{t('items.types.task')}</option>
-                <option value="note">{t('items.types.note')}</option>
-                <option value="bug">{t('items.types.bug')}</option>
-                <option value="improvement">{t('items.types.improvement')}</option>
-              </select>
-            </label>
+            <p className="mt-1 text-sm text-gray-500">
+              {t(isImprovements ? 'improvements.createDescription' : 'items.createDescription')}
+            </p>
+            {!isImprovements && (
+              <label className="mt-4 block">
+                <span className="text-sm font-medium text-gray-700">{t('items.form.type')}</span>
+                <select
+                  value={createType}
+                  onChange={(e) => setCreateType(e.target.value as ItemType)}
+                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                >
+                  <option value="task">{t('items.types.task')}</option>
+                  <option value="note">{t('items.types.note')}</option>
+                  <option value="bug">{t('items.types.bug')}</option>
+                </select>
+              </label>
+            )}
             <label className="mt-3 block">
               <span className="text-sm font-medium text-gray-700">{t('items.form.message')}</span>
               <textarea

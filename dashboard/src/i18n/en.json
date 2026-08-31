@@ -23,8 +23,8 @@
   "common.actions": "Actions",
   "common.copied": "Copied",
   "common.never": "Never",
-
   "nav.items": "Issues",
+  "nav.improvements": "Improvements",
   "nav.errors": "Errors",
   "nav.projects": "Projects",
   "nav.webhooks": "Webhooks",
@@ -32,7 +32,6 @@
   "nav.profile": "Profile",
   "nav.sourceCode": "Scout source code",
   "nav.logout": "Log out",
-
   "auth.title": "Scout",
   "auth.subtitle": "Sign in to your account",
   "auth.email": "Email",
@@ -40,11 +39,13 @@
   "auth.loginButton": "Sign in",
   "auth.loggingIn": "Signing in...",
   "auth.loginError": "Login error",
-
   "items.title": "Issues",
   "items.description": "Project bugs, notes, and tasks",
   "items.create": "Create",
   "items.createDescription": "Tasks are committed work; notes are lightweight observations to triage later.",
+  "improvements.title": "Improvements",
+  "improvements.description": "Change requests beyond what the product already promises",
+  "improvements.createDescription": "An improvement describes what the product should start doing beyond its current promise.",
   "items.types.all": "All types",
   "items.types.bug": "Bug",
   "items.types.note": "Note",
@@ -63,7 +64,7 @@
   "items.queues.needs_acceptance": "Needs Acceptance",
   "items.queues.accepted": "Accepted",
   "items.queues.archived": "Archived",
-  "items.queues.improvements": "Improvements",
+  "items.queues.all": "All",
   "items.priorities.all": "All priorities",
   "items.priorities.critical": "Critical",
   "items.priorities.high": "High",
@@ -89,7 +90,6 @@
   "items.form.placeholders.note": "A thought, observation, or question worth saving",
   "items.form.placeholders.task": "What needs to be done and what result is expected?",
   "items.form.placeholders.improvement": "What should the product start doing beyond what it already promises?",
-
   "items.detail.back": "Back",
   "items.detail.deleteConfirm": "Delete this bug? This action cannot be undone.",
   "items.detail.actions.claim": "Claim",
@@ -261,7 +261,6 @@
   "items.detail.links.types.blocked_by": "Blocked by",
   "items.detail.links.types.caused_by": "Shared root cause",
   "items.detail.links.types.conflicts": "Conflicts",
-
   "errors.title": "Error groups",
   "errors.description": "Automatically grouped runtime errors reported by services",
   "errors.empty": "No error groups",
@@ -326,7 +325,6 @@
   "errors.actions.unignore": "Restore",
   "errors.actions.ignorePrompt": "Ignore reason",
   "errors.actions.failed": "Action failed",
-
   "projects.title": "Projects",
   "projects.description": "Manage projects and allowed browser origins",
   "projects.create": "Create project",
@@ -349,7 +347,6 @@
   "projects.modal.create": "Create project",
   "projects.modal.edit": "Edit project",
   "projects.deleteConfirm": "Delete this project?",
-
   "integrations.backToProjects": "Back to projects",
   "integrations.title": "Project integrations",
   "integrations.widget.title": "Widget install code",
@@ -381,7 +378,6 @@
   "integrations.apiKeys.purposes.ci": "CI",
   "integrations.apiKeys.purposes.integration": "Integration",
   "integrations.apiKeys.purposes.custom": "Custom",
-
   "users.title": "Users",
   "users.description": "Manage users and roles",
   "users.create": "Create user",
@@ -415,7 +411,6 @@
   "users.modal.edit": "Edit user",
   "users.deleteConfirm": "Delete this user?",
   "users.passwordMinLength": "Minimum 8 characters, lowercase and uppercase letter, digit",
-
   "webhooks.title": "Webhooks",
   "webhooks.description": "Event notifications for projects",
   "webhooks.create": "Add webhook",
@@ -445,7 +440,6 @@
   "webhooks.testError": "Send error",
   "webhooks.empty": "No webhooks",
   "webhooks.eventsRequired": "Select at least one event",
-
   "errors.INVALID_CREDENTIALS": "Invalid email or password",
   "errors.UNAUTHORIZED": "Authentication required",
   "errors.TOKEN_EXPIRED": "Token expired, please sign in again",
@@ -476,20 +470,17 @@
   "errors.ITEM_STATE_CONFLICT": "The issue changed elsewhere. The latest data was loaded; review it and retry.",
   "errors.NETWORK_ERROR": "Network error, check your connection",
   "errors.UNKNOWN_ERROR": "Unknown error",
-
   "meta.browser": "Browser",
   "meta.os": "OS",
   "meta.screen": "Screen",
   "meta.timezone": "Timezone",
   "meta.language": "Language",
   "meta.dpr": "DPR",
-
   "notes.statusChange": "Status: {from} → {to}",
   "notes.assigned": "Assigned: {name}",
   "notes.typeChange": "Type: {from} → {to}",
   "notes.reopened": "Reopened",
   "notes.reopenedDetailed": "Reopened: {from} → {to} ({details})",
-
   "validation.passwordField": "Password",
   "validation.emailField": "Email",
   "validation.nameField": "Name",

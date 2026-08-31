@@ -4,6 +4,7 @@ import { canManageIntegrations, canManageMembers, canSeeProjectAdmin, getUser, l
 import { api } from '../lib/api';
 import { useSSE, type SSEEventType } from '../hooks/useSSE';
 import { useProjectOpenCounts } from '../hooks/useProjectOpenCounts';
+import { SCOPE_ITEM_TYPES } from '../lib/item-types';
 import { useTranslation, LOCALE_LABELS, type Locale } from '../i18n';
 
 const SCOUT_REPOSITORY_URL = 'https://github.com/scout-dev-org/scout';
@@ -18,6 +19,10 @@ export default function Layout() {
   const location = useLocation();
   const { t, locale, setLocale } = useTranslation();
   const { totalOpen: newCount, reload: reloadCounts } = useProjectOpenCounts(projectIds);
+  const { totalOpen: newImprovementCount, reload: reloadImprovementCounts } = useProjectOpenCounts(
+    projectIds,
+    SCOPE_ITEM_TYPES.improvements,
+  );
 
   // Close user menu on route change
   useEffect(() => {
@@ -31,16 +36,20 @@ export default function Layout() {
   }, []);
 
   useEffect(() => {
-    const interval = setInterval(reloadCounts, 30_000);
+    const interval = setInterval(() => {
+      reloadCounts();
+      reloadImprovementCounts();
+    }, 30_000);
     return () => clearInterval(interval);
-  }, [reloadCounts]);
+  }, [reloadCounts, reloadImprovementCounts]);
 
   // SSE: refresh badge count on item changes
   const handleSSEEvent = useCallback((event: SSEEventType) => {
     if (event === 'item.created' || event === 'item.status_changed' || event === 'item.deleted') {
       reloadCounts();
+      reloadImprovementCounts();
     }
-  }, [reloadCounts]);
+  }, [reloadCounts, reloadImprovementCounts]);
 
   useSSE({ onEvent: handleSSEEvent });
 
@@ -52,8 +61,15 @@ export default function Layout() {
     }`;
 
   const bottomNavLinkClass = ({ isActive }: { isActive: boolean }) =>
-    `flex flex-col items-center gap-0.5 text-[11px] font-medium transition-colors ${
+    `flex min-w-0 flex-1 flex-col items-center gap-0.5 text-[11px] font-medium transition-colors ${
       isActive ? 'text-gray-900' : 'text-gray-400'
+    }`;
+
+  const mobileMenuLinkClass = ({ isActive }: { isActive: boolean }) =>
+    `rounded-md border px-4 py-2.5 text-center text-sm font-medium ${
+      isActive
+        ? 'border-gray-300 bg-gray-100 text-gray-900'
+        : 'border-gray-200 text-gray-700 hover:bg-gray-50'
     }`;
 
   const localeSwitcher = (
@@ -103,6 +119,19 @@ export default function Layout() {
             {newCount > 0 && (
               <span className="ml-auto rounded-full bg-yellow-400 px-2 py-0.5 text-xs font-semibold text-yellow-900">
                 {newCount}
+              </span>
+            )}
+          </NavLink>
+          <NavLink to="/improvements" className={linkClass}>
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 20v-6" />
+              <path d="M9 17l3-3 3 3" />
+              <path d="M20 12a8 8 0 1 0-16 0" />
+            </svg>
+            {t('nav.improvements')}
+            {newImprovementCount > 0 && (
+              <span className="ml-auto rounded-full bg-yellow-400 px-2 py-0.5 text-xs font-semibold text-yellow-900">
+                {newImprovementCount}
               </span>
             )}
           </NavLink>
@@ -204,6 +233,17 @@ export default function Layout() {
           >
             <div className="mb-1 text-sm font-medium text-gray-800">{user?.name ?? 'User'}</div>
             <div className="mb-3 text-xs text-gray-500">{user?.email}</div>
+            {canOpenProjectAdmin && (
+              <div className="mb-4 flex flex-col gap-2">
+                <NavLink to="/projects" className={mobileMenuLinkClass}>{t('nav.projects')}</NavLink>
+                {showWebhooks && (
+                  <NavLink to="/webhooks" className={mobileMenuLinkClass}>{t('nav.webhooks')}</NavLink>
+                )}
+                {showUsers && (
+                  <NavLink to="/users" className={mobileMenuLinkClass}>{t('nav.users')}</NavLink>
+                )}
+              </div>
+            )}
             <div className="mb-4">
               {localeSwitcher}
             </div>
@@ -252,12 +292,27 @@ export default function Layout() {
               <path d="M2 12l10 5 10-5" />
             </svg>
             {newCount > 0 && (
-              <span className="absolute -top-1.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-yellow-400 px-1 text-[10px] font-bold text-yellow-900">
+              <span className="absolute -top-1.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-yellow-400 px-1 text-[11px] font-bold text-yellow-900">
                 {newCount}
               </span>
             )}
           </div>
-          {t('nav.items')}
+          <span className="w-full truncate px-0.5 text-center">{t('nav.items')}</span>
+        </NavLink>
+        <NavLink to="/improvements" className={bottomNavLinkClass}>
+          <div className="relative">
+            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 20v-6" />
+              <path d="M9 17l3-3 3 3" />
+              <path d="M20 12a8 8 0 1 0-16 0" />
+            </svg>
+            {newImprovementCount > 0 && (
+              <span className="absolute -top-1.5 -right-2.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-yellow-400 px-1 text-[11px] font-bold text-yellow-900">
+                {newImprovementCount}
+              </span>
+            )}
+          </div>
+          <span className="w-full truncate px-0.5 text-center">{t('nav.improvements')}</span>
         </NavLink>
         <NavLink to="/errors" className={bottomNavLinkClass}>
           <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -265,47 +320,17 @@ export default function Layout() {
             <path d="M12 9v4" />
             <path d="M12 17h.01" />
           </svg>
-          {t('nav.errors')}
+          <span className="w-full truncate px-0.5 text-center">{t('nav.errors')}</span>
         </NavLink>
-          {canOpenProjectAdmin && (
-          <>
-            <NavLink to="/projects" className={bottomNavLinkClass}>
-              <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" />
-              </svg>
-              {t('nav.projects')}
-            </NavLink>
-            {showWebhooks && (
-              <NavLink to="/webhooks" className={bottomNavLinkClass}>
-                <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                </svg>
-                {t('nav.webhooks')}
-              </NavLink>
-            )}
-            {showUsers && (
-              <NavLink to="/users" className={bottomNavLinkClass}>
-                <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                </svg>
-                {t('nav.users')}
-              </NavLink>
-            )}
-          </>
-        )}
         <button
           onClick={() => setShowUserMenu((v) => !v)}
-          className="flex flex-col items-center gap-0.5 text-[11px] font-medium text-gray-400 transition-colors"
+          className="flex min-w-0 flex-1 flex-col items-center gap-0.5 text-[11px] font-medium text-gray-400 transition-colors"
         >
           <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
             <circle cx="12" cy="7" r="4" />
           </svg>
-          {t('nav.profile')}
+          <span className="w-full truncate px-0.5 text-center">{t('nav.profile')}</span>
         </button>
       </nav>
     </div>

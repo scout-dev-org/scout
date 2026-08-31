@@ -23,8 +23,8 @@
   "common.actions": "Действия",
   "common.copied": "Скопировано",
   "common.never": "Никогда",
-
   "nav.items": "Задачи",
+  "nav.improvements": "Доработки",
   "nav.errors": "Ошибки",
   "nav.projects": "Проекты",
   "nav.webhooks": "Вебхуки",
@@ -32,7 +32,6 @@
   "nav.profile": "Профиль",
   "nav.sourceCode": "Исходный код Scout",
   "nav.logout": "Выйти",
-
   "auth.title": "Scout",
   "auth.subtitle": "Войти в аккаунт",
   "auth.email": "Эл. почта",
@@ -40,11 +39,13 @@
   "auth.loginButton": "Войти",
   "auth.loggingIn": "Вход...",
   "auth.loginError": "Ошибка входа",
-
   "items.title": "Задачи",
   "items.description": "Баги, заметки и задачи проекта",
   "items.create": "Создать",
   "items.createDescription": "Задача создаётся для осознанной работы, заметка — чтобы не потерять наблюдение.",
+  "improvements.title": "Доработки",
+  "improvements.description": "Запросы на изменение продукта сверх того, что он уже обещает",
+  "improvements.createDescription": "Доработка описывает, что продукт должен начать делать сверх текущего обещания.",
   "items.types.all": "Все типы",
   "items.types.bug": "Баг",
   "items.types.note": "Заметка",
@@ -63,7 +64,7 @@
   "items.queues.needs_acceptance": "На принятии",
   "items.queues.accepted": "Принято",
   "items.queues.archived": "Архив",
-  "items.queues.improvements": "Доработки",
+  "items.queues.all": "Все",
   "items.priorities.all": "Все приоритеты",
   "items.priorities.critical": "Критический",
   "items.priorities.high": "Высокий",
@@ -89,7 +90,6 @@
   "items.form.placeholders.note": "Мысль, наблюдение или вопрос, который важно не потерять",
   "items.form.placeholders.task": "Что нужно сделать и какой результат ожидается?",
   "items.form.placeholders.improvement": "Что продукт должен начать делать сверх того, что уже обещает?",
-
   "items.detail.back": "Назад",
   "items.detail.deleteConfirm": "Удалить баг? Это действие нельзя отменить.",
   "items.detail.actions.claim": "Взять в работу",
@@ -261,7 +261,6 @@
   "items.detail.links.types.blocked_by": "Заблокирована",
   "items.detail.links.types.caused_by": "Общий корень",
   "items.detail.links.types.conflicts": "Конфликтует",
-
   "errors.title": "Группы ошибок",
   "errors.description": "Автоматически сгруппированные ошибки, о которых сообщили сервисы",
   "errors.empty": "Групп ошибок нет",
@@ -326,7 +325,6 @@
   "errors.actions.unignore": "Вернуть",
   "errors.actions.ignorePrompt": "Причина игнорирования",
   "errors.actions.failed": "Не удалось выполнить действие",
-
   "projects.title": "Проекты",
   "projects.description": "Управление проектами и разрешёнными источниками",
   "projects.create": "Создать проект",
@@ -349,7 +347,6 @@
   "projects.modal.create": "Создание проекта",
   "projects.modal.edit": "Редактирование проекта",
   "projects.deleteConfirm": "Удалить этот проект?",
-
   "integrations.backToProjects": "Назад к проектам",
   "integrations.title": "Интеграции проекта",
   "integrations.widget.title": "Код установки виджета",
@@ -381,7 +378,6 @@
   "integrations.apiKeys.purposes.ci": "CI",
   "integrations.apiKeys.purposes.integration": "Интеграция",
   "integrations.apiKeys.purposes.custom": "Другое",
-
   "users.title": "Пользователи",
   "users.description": "Управление пользователями и ролями",
   "users.create": "Создать пользователя",
@@ -415,7 +411,6 @@
   "users.modal.edit": "Редактирование пользователя",
   "users.deleteConfirm": "Удалить этого пользователя?",
   "users.passwordMinLength": "Минимум 8 символов, строчная и заглавная буква, цифра",
-
   "webhooks.title": "Вебхуки",
   "webhooks.description": "Уведомления о событиях в проектах",
   "webhooks.create": "Добавить вебхук",
@@ -445,7 +440,6 @@
   "webhooks.testError": "Ошибка отправки",
   "webhooks.empty": "Нет вебхуков",
   "webhooks.eventsRequired": "Выберите хотя бы одно событие",
-
   "errors.INVALID_CREDENTIALS": "Неверный email или пароль",
   "errors.UNAUTHORIZED": "Необходима авторизация",
   "errors.TOKEN_EXPIRED": "Токен истёк, войдите заново",
@@ -476,20 +470,17 @@
   "errors.ITEM_STATE_CONFLICT": "Задача была изменена в другом месте. Загружены актуальные данные; проверьте их и повторите действие.",
   "errors.NETWORK_ERROR": "Ошибка сети, проверьте подключение",
   "errors.UNKNOWN_ERROR": "Неизвестная ошибка",
-
   "meta.browser": "Браузер",
   "meta.os": "ОС",
   "meta.screen": "Экран",
   "meta.timezone": "Часовой пояс",
   "meta.language": "Язык",
   "meta.dpr": "DPR",
-
   "notes.statusChange": "Статус: {from} → {to}",
   "notes.assigned": "Назначено: {name}",
   "notes.typeChange": "Тип: {from} → {to}",
   "notes.reopened": "Переоткрыт",
   "notes.reopenedDetailed": "Переоткрыт: {from} → {to} ({details})",
-
   "validation.passwordField": "Пароль",
   "validation.emailField": "Эл. почта",
   "validation.nameField": "Имя",

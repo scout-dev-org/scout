@@ -23,8 +23,8 @@
   "common.actions": "Harakatlar",
   "common.copied": "Nusxalandi",
   "common.never": "Hech qachon",
-
   "nav.items": "Topshiriqlar",
+  "nav.improvements": "Yaxshilashlar",
   "nav.errors": "Xatoliklar",
   "nav.projects": "Loyihalar",
   "nav.webhooks": "Vebhuklar",
@@ -32,7 +32,6 @@
   "nav.profile": "Profil",
   "nav.sourceCode": "Scout manba kodi",
   "nav.logout": "Chiqish",
-
   "auth.title": "Scout",
   "auth.subtitle": "Hisobga kirish",
   "auth.email": "Elektron pochta",
@@ -40,11 +39,13 @@
   "auth.loginButton": "Kirish",
   "auth.loggingIn": "Kirish...",
   "auth.loginError": "Kirish xatoligi",
-
   "items.title": "Topshiriqlar",
   "items.description": "Loyiha xatoliklari, eslatmalari va topshiriqlari",
   "items.create": "Yaratish",
   "items.createDescription": "Topshiriq bajarilishi kerak bo'lgan ish; eslatma esa keyin ko'rib chiqiladigan yengil kuzatuv.",
+  "improvements.title": "Yaxshilashlar",
+  "improvements.description": "Mahsulot allaqachon va'da qilganidan tashqari o'zgartirish so'rovlari",
+  "improvements.createDescription": "Yaxshilash mahsulot hozirgi va'dasidan tashqari nima qilishi kerakligini tasvirlaydi.",
   "items.types.all": "Barcha turlar",
   "items.types.bug": "Xatolik",
   "items.types.note": "Eslatma",
@@ -63,7 +64,7 @@
   "items.queues.needs_acceptance": "Qabul kutilmoqda",
   "items.queues.accepted": "Qabul qilindi",
   "items.queues.archived": "Arxiv",
-  "items.queues.improvements": "Yaxshilashlar",
+  "items.queues.all": "Barchasi",
   "items.priorities.all": "Barcha ustuvorliklar",
   "items.priorities.critical": "Kritik",
   "items.priorities.high": "Yuqori",
@@ -89,7 +90,6 @@
   "items.form.placeholders.note": "Saqlab qo'yish kerak bo'lgan fikr, kuzatuv yoki savol",
   "items.form.placeholders.task": "Nima qilish kerak va qanday natija kutiladi?",
   "items.form.placeholders.improvement": "Mahsulot va'da qilganidan tashqari yana nima qilishi kerak?",
-
   "items.detail.back": "Orqaga",
   "items.detail.deleteConfirm": "Xatolikni o'chirish? Bu amalni ortga qaytarib bo'lmaydi.",
   "items.detail.actions.claim": "Ishga olish",
@@ -261,7 +261,6 @@
   "items.detail.links.types.blocked_by": "Bloklangan",
   "items.detail.links.types.caused_by": "Umumiy sabab",
   "items.detail.links.types.conflicts": "Zid keladi",
-
   "errors.title": "Xatolik guruhlari",
   "errors.description": "Servislar xabar qilgan, avtomatik guruhlangan runtime xatoliklari",
   "errors.empty": "Xatolik guruhlari yo'q",
@@ -326,7 +325,6 @@
   "errors.actions.unignore": "Qaytarish",
   "errors.actions.ignorePrompt": "E'tiborsiz qoldirish sababi",
   "errors.actions.failed": "Harakat bajarilmadi",
-
   "projects.title": "Loyihalar",
   "projects.description": "Loyihalar va ruxsat etilgan brauzer manbalarini boshqarish",
   "projects.create": "Loyiha yaratish",
@@ -349,7 +347,6 @@
   "projects.modal.create": "Loyiha yaratish",
   "projects.modal.edit": "Loyihani tahrirlash",
   "projects.deleteConfirm": "Bu loyihani o'chirish?",
-
   "integrations.backToProjects": "Loyihalarga qaytish",
   "integrations.title": "Loyiha integratsiyalari",
   "integrations.widget.title": "Vidjet o'rnatish kodi",
@@ -381,7 +378,6 @@
   "integrations.apiKeys.purposes.ci": "CI",
   "integrations.apiKeys.purposes.integration": "Integratsiya",
   "integrations.apiKeys.purposes.custom": "Boshqa",
-
   "users.title": "Foydalanuvchilar",
   "users.description": "Foydalanuvchilar va rollarni boshqarish",
   "users.create": "Foydalanuvchi yaratish",
@@ -415,7 +411,6 @@
   "users.modal.edit": "Foydalanuvchini tahrirlash",
   "users.deleteConfirm": "Bu foydalanuvchini o'chirish?",
   "users.passwordMinLength": "Kamida 8 ta belgi, kichik va katta harf, raqam",
-
   "webhooks.title": "Vebhuklar",
   "webhooks.description": "Loyihalardagi hodisalar haqida bildirishnomalar",
   "webhooks.create": "Vebhuk qo'shish",
@@ -445,7 +440,6 @@
   "webhooks.testError": "Yuborish xatoligi",
   "webhooks.empty": "Vebhuklar yo'q",
   "webhooks.eventsRequired": "Kamida bitta hodisani tanlang",
-
   "errors.INVALID_CREDENTIALS": "Noto'g'ri email yoki parol",
   "errors.UNAUTHORIZED": "Avtorizatsiya talab qilinadi",
   "errors.TOKEN_EXPIRED": "Token muddati tugagan, qayta kiring",
@@ -476,20 +470,17 @@
   "errors.ITEM_STATE_CONFLICT": "Topshiriq boshqa joyda o'zgartirildi. So'nggi ma'lumotlar yuklandi; ularni tekshirib, amalni takrorlang.",
   "errors.NETWORK_ERROR": "Tarmoq xatoligi, ulanishni tekshiring",
   "errors.UNKNOWN_ERROR": "Noma'lum xatolik",
-
   "meta.browser": "Brauzer",
   "meta.os": "OT",
   "meta.screen": "Ekran",
   "meta.timezone": "Vaqt zonasi",
   "meta.language": "Til",
   "meta.dpr": "DPR",
-
   "notes.statusChange": "Holat: {from} → {to}",
   "notes.assigned": "Tayinlangan: {name}",
   "notes.typeChange": "Tur: {from} → {to}",
   "notes.reopened": "Qayta ochilgan",
   "notes.reopenedDetailed": "Qayta ochilgan: {from} → {to} ({details})",
-
   "validation.passwordField": "Parol",
   "validation.emailField": "Elektron pochta",
   "validation.nameField": "Ism",
